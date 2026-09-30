@@ -56,7 +56,7 @@ The mode names the file effects a command may perform; enforcement completeness 
 | Mode | Effect |
 |---|---|
 | `read-only` | Denies writes except required sinks such as `/dev/null` |
-| `workspace-write` | Allows writes under the workspace root plus a backend-defined temp area |
+| `workspace-write` | Allows writes under the workspace root, the policy's extra writable roots, plus a backend-defined temp area |
 | `danger-full-access` | Bypasses confinement; the consumer spawns its original argv |
 
 Enforcement is reported per call: `full` means the backend governs every promised file effect, while `partial` means an active backend or older kernel ABI governs only a subset — the Windows ACL rung and older Landlock ABIs are the current partial cases, so a consumer that requires the absolute boundary can reject or surface them.
@@ -101,7 +101,7 @@ The ladder is a closed table — `read-only` may escalate to `workspace-write` o
 
 ### Writable roots
 
-`workspace-write` means "the workspace root plus the host temp areas": `writableRoots` derives that allow-list canonically, resolving symlinks and deduplicating, so the Seatbelt profile and the in-process fs fence grant exactly the same roots.
+`workspace-write` means "the workspace root, the policy's extra writable roots, plus the host temp areas": `writableRoots` derives that allow-list canonically, resolving symlinks and deduplicating, so the Seatbelt profile and the in-process fs fence grant exactly the same roots. A policy carries no extra roots by default, and an extra root aliasing the workspace root collapses into it.
 
 </details>
 

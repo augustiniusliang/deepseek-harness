@@ -33,6 +33,10 @@ describe('writableRoots', () => {
     expect(writableRoots({ mode: 'read-only', workspaceRoot: process.cwd() })).toEqual([])
   })
 
+  it('read-only ignores extra writable roots', () => {
+    expect(writableRoots({ mode: 'read-only', workspaceRoot: process.cwd(), extraWritableRoots: ['/elsewhere'] })).toEqual([])
+  })
+
   it('workspace-write grants the workspace root plus the platform temp areas, canonical and deduplicated', () => {
     const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
     roots.push(ws)
@@ -41,6 +45,30 @@ describe('writableRoots', () => {
     expect(writable).toContain(canonicalPath('/tmp'))
     expect(writable).toContain(realpathSync.native(tmpdir()))
     // Deduplicated after canonicalization (/tmp and os.tmpdir() may coincide).
+    expect(new Set(writable).size).toBe(writable.length)
+  })
+
+  it('an absent or empty extra-root list is exactly the single-root allow-list', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
+    roots.push(ws)
+    const bare = writableRoots({ mode: 'workspace-write', workspaceRoot: ws })
+    expect(writableRoots({ mode: 'workspace-write', workspaceRoot: ws, extraWritableRoots: [] })).toEqual(bare)
+  })
+
+  it('workspace-write merges extra writable roots canonically and deduplicates against the standing roots', () => {
+    const ws = mkdtempSync(join(tmpdir(), 'dsh-ws-'))
+    const extra = mkdtempSync(join(tmpdir(), 'dsh-extra-'))
+    roots.push(ws, extra)
+    const writable = writableRoots({
+      mode: 'workspace-write',
+      workspaceRoot: ws,
+      // The duplicate workspace root and the missing path exercise the dedupe
+      // and the conservative as-is fallback after canonicalization.
+      extraWritableRoots: [extra, ws, '/does/not/exist/anywhere-xyz'],
+    })
+    expect(writable).toContain(realpathSync.native(extra))
+    expect(writable).toContain('/does/not/exist/anywhere-xyz')
+    expect(writable.filter(root => root === realpathSync.native(ws))).toHaveLength(1)
     expect(new Set(writable).size).toBe(writable.length)
   })
 })

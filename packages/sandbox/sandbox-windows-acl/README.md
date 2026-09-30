@@ -45,8 +45,10 @@ const workspaceRoot = process.cwd()
 const tempDir = mkdtempSync(join(tmpdir(), 'dsh-'))
 
 // mode selects the token's restricting-SID list (see Modes below) and must
-// match the grant shape. workspace-write requires distinct workspace and
-// private-temp identities; pass tempDir: null to disable temp writes.
+// match the grant shape. workspace-write requires one write identity per
+// writable directory — writeSid owns writableDirs[0] and extraWriteSids the
+// rest — plus a distinct private-temp identity; pass tempDir: null to disable
+// temp writes.
 const sandbox = new AclSandbox({
   writableDirs: [workspaceRoot],
   tempDir,
@@ -67,7 +69,7 @@ The workspace security descriptor edits are granted standing — `dispose()` lea
 
 ### What confinement gives you
 
-Under `workspace-write`, the child may write into the workspace and its private temp directory; other ACL-addressable writes and deletes are denied except the documented hard-link and AppContainer-ACL boundaries. Under `read-only`, no explicit write grants exist, so writes and deletes are denied with the same documented boundaries.
+Under `workspace-write`, the child may write into each writable directory of its policy (the workspace root plus any extra writable roots) and its private temp directory; other ACL-addressable writes and deletes are denied except the documented hard-link and AppContainer-ACL boundaries. Under `read-only`, no explicit write grants exist, so writes and deletes are denied with the same documented boundaries.
 
 Temp isolation is per live session/workspace pair: sessions sharing a workspace share its write authority but cannot write one another's temp directories. A fresh provider always chooses a new temp path and SID, so crash residue cannot block or authorize a resumed session.
 
@@ -91,7 +93,7 @@ The caller's token is duplicated into a `WRITE_RESTRICTED` token whose restricti
 
 ### Modes and token lists
 
-`workspace-write` (logon SID, Everyone, workspace SID, temp SID) grants the workspace and the session's private temp subdirectory separate Write grants; `read-only` (logon SID, Everyone — no write SID) grants none. Both modes spawn a Low-integrity token, and only labeled directories stay writable for it. The keep-alive group (logon SID + Everyone) is present in both modes: without it, early DLL initialization dies with `0xC0000142` and CNG crashes pwsh with `0xE0434352`. The write SID stays out of the read-only list on purpose: the standing workspace grant from an earlier workspace-write period remains inert because the write-restricted pass-2 check grants only what the restricting list carries, while the standing security descriptor edit keeps a re-upgrade free of re-propagation.
+`workspace-write` (logon SID, Everyone, one write SID per writable root, temp SID) grants each writable directory and the session's private temp subdirectory separate Write grants; `read-only` (logon SID, Everyone — no write SID) grants none. Both modes spawn a Low-integrity token, and only labeled directories stay writable for it. The keep-alive group (logon SID + Everyone) is present in both modes: without it, early DLL initialization dies with `0xC0000142` and CNG crashes pwsh with `0xE0434352`. The write SIDs stay out of the read-only list on purpose: the standing workspace grant from an earlier workspace-write period remains inert because the write-restricted pass-2 check grants only what the restricting list carries, while the standing security descriptor edit keeps a re-upgrade free of re-propagation.
 
 NUL writes are ambient, not granted: the device DACL grants Everyone read+write+execute (`0x1201BF`), so openers whose mask fits it (cmd `> NUL`, node `\\.\NUL`) can write it in both modes. `Set-Content NUL` fails in both modes (a PowerShell/.NET-layer effect, not the device DACL), while PowerShell's `> $null` redirection keeps working.
 
@@ -102,10 +104,10 @@ Authenticated Users is absent from both lists — the WMI namespace security che
 The seam-facing shape is the runner entry (`./runner`): an argv-prefix wrapper `dsh-sandbox-local` spawns in place of the caller's command, with the same architecture as bwrap/landlock-run/sandbox-exec. The runner creates the restricted token, spawns the wrapped argv under it with the caller's stdio passed straight through, wraps the child in a `KILL_ON_JOB_CLOSE` job, mirrors the child's exit code, and revokes its self-managed temp grant on exit. Every runner-side failure prints `windows-acl-run: <detail>` to stderr and exits 127 — the seam's runner-failure rules match that signature.
 
 ```sh
-node runner.js --workspace <dir> --temp <dir> --mode <read-only|workspace-write> [--write-sid <S-1-4-…> --temp-write-sid <S-1-4-…>] -- <argv...>
+node runner.js --workspace <dir> [--workspace <dir>...] --temp <dir> --mode <read-only|workspace-write> [--write-sid <S-1-4-…> [--write-sid <S-1-4-…>...] --temp-write-sid <S-1-4-…>] -- <argv...>
 ```
 
-The seam materializes the deterministic workspace SID's ACE standing (once per workspace per server lifetime — the reuse cache), then creates a random private temp directory and a distinct revocable SID for each live session/workspace pair, passing both as the required `--write-sid`/`--temp-write-sid` pair; the runner verifies each against its owning path and neither grants nor revokes (`manageDacls: false`). A fork receives a different temp capability, and a fresh provider gives even the same resumed session a new path and SID, so crash residue is inert litter. Without the pair, `--temp` names a root: an agentless workspace-write runner creates a random private child, self-manages its temp SID, rewrites TMP/TEMP, and removes the child on exit. Re-granting the standing workspace ACE after a restart is idempotent: `grantWrite` reads the current DACL and skips the re-propagation when the exact ACE already stands. A workspace equal to or containing the temp root is rejected before any grant.
+`--workspace` may repeat: the first directory is the session workspace, each later one an extra writable root of the same policy, and `--write-sid` repeats once per `--workspace` in the same order (a single `--workspace` parses and behaves exactly as before). The seam materializes each deterministic root SID's ACE standing (once per root per server lifetime — the reuse cache), then creates a random private temp directory and a distinct revocable SID for each live session/workspace pair, passing the whole required `--write-sid`/`--temp-write-sid` set; the runner verifies each SID against its owning path and neither grants nor revokes (`manageDacls: false`). A fork receives a different temp capability, and a fresh provider gives even the same resumed session a new path and SID, so crash residue is inert litter. Without the set, `--temp` names a root: an agentless workspace-write runner creates a random private child, self-manages its temp SID, rewrites TMP/TEMP, and removes the child on exit. Re-granting a standing root ACE after a restart is idempotent: `grantWrite` reads the current DACL and skips the re-propagation when the exact ACE already stands. A workspace equal to or containing the temp root is rejected before any grant, and so is any extra writable root.
 
 When launched with the subprocess control marker, the runner forwards fd 7 through the restricted child's CRT startup table and closes its own copy immediately after spawn. The optional `controlFileDescriptor: 7` input requires `stdio: 'inherit'`; requesting it with piped stdio fails before process creation.
 
@@ -169,7 +171,7 @@ None directly; the denial surface belongs to the tool layer.
 
 These limits define when the backend is a poor fit or needs special operational care. They are current package constraints, not a general Windows comparison or a task backlog.
 
-- **One write allowlist per workspace** — the write SID is the unit of the allowlist and IS the workspace identity; reusing one sandbox instance across two workspaces widens both grants to both roots. Create one instance per workspace root — the seam does exactly this, keyed by the workspace path.
+- **One write allowlist per writable root** — the write SID is the unit of the allowlist and IS the root identity, so each writable directory carries its own SID and standing ACE; one sandbox instance may cover several roots (the seam passes the workspace root plus any extra writable roots), and reusing a single instance across policies that do not list a root leaves that root unaffected rather than widening it.
 - **Cleanup is best-effort by design** — `dispose()` attempts every temp revocation and aggregates failures into an `AggregateError`; a cleanup failure can leave the random directory and its temp-SID-only ACE behind. Once the process exits no future token carries that SID, so the residue is inert until OS temp hygiene or manual removal reclaims it.
 - **Standing workspace ACEs are invisible residue** — renaming a workspace derives a new SID; the old ACEs on the old path stay (inert, write-SID-only), and a future cleanup command may reap them.
 - **NULL-DACL directories are not identity-preserving under grant+revoke** — a directory with a NULL DACL means "everyone full control"; `grantWrite` builds the new ACL from that null, and the revoke round-trip leaves an empty (deny-all) DACL rather than the original NULL DACL. Real workspace and temp directories carry real DACLs, so this stays a documented edge.

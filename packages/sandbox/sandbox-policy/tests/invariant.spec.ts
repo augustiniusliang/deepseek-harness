@@ -50,4 +50,25 @@ describe('sandbox-policy invariants', () => {
       packageName: '@deepseek-ai/dsh-sandbox-policy',
     })
   })
+
+  it('accepts a well-formed durable extra-roots list', async () => {
+    const ctx = await setup()
+    expect(() => {
+      ctx.emit('session/event', {} as Session, {
+        type: 'sandbox/extra-roots', seq: 0, time: 0, data: { roots: ['/data', '/scratch'] },
+      } as SessionEvent)
+    }).not.toThrow()
+  })
+
+  it.each([
+    [{ roots: 'everywhere' }, '"everywhere"'],
+    [{ roots: ['/data', 42] }, '["/data",42]'],
+  ])('rejects and attributes forged extra-roots payload %j', async (data, rendered) => {
+    const ctx = await setup()
+    expect(() => {
+      ctx.emit('session/event', {} as Session, {
+        type: 'sandbox/extra-roots', seq: 0, time: 0, data,
+      } as SessionEvent)
+    }).toThrow(new InvariantError('@deepseek-ai/dsh-sandbox-policy', `sandbox/extra-roots carries non-string-list roots ${rendered}`))
+  })
 })

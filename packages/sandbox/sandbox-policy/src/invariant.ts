@@ -18,6 +18,10 @@ function validateEvent(event: SessionEvent, fail: InvariantFailure): void {
   if (event.type === 'sandbox/mode' && !SANDBOX_MODES.includes(event.data.mode)) {
     fail(`sandbox/mode carries unknown mode ${JSON.stringify(event.data.mode)}`)
   }
+  if (event.type === 'sandbox/extra-roots'
+    && (!Array.isArray(event.data.roots) || event.data.roots.some(root => typeof root !== 'string'))) {
+    fail(`sandbox/extra-roots carries non-string-list roots ${JSON.stringify(event.data.roots)}`)
+  }
 }
 
 /** Install validation for loaded and newly appended sandbox modes. */

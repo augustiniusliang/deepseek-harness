@@ -1,10 +1,11 @@
 /**
  * The sandbox POLICY home (`ctx.sandboxPolicy`): the single owner of the
  * deployment's sandbox fallbacks plus per-session resolution: the file-effect
- * {@link SandboxMode}, the `workspace-write` root, and the override kit (the
- * `sandbox/mode` event, its fold, and its write path; the fold is the
- * `sandboxMode` session-projection unit registered here, while the event and
- * write path come from `./session-mode.ts`).
+ * {@link SandboxMode}, the `workspace-write` root, and the override kits (the
+ * `sandbox/mode` and `sandbox/extra-roots` events, their folds, and their
+ * write paths; the folds are the `sandboxMode` and `sandboxExtraRoots`
+ * session-projection units registered here, while the events and write paths
+ * come from `./session-mode.ts` and `./session-extra-roots.ts`).
  * Before each agent request, the owner also contributes the resolved policy to
  * the cache-safe runtime-context snapshot. The agent loop logs that snapshot as
  * model history, so replay reconstructs the same mode and root the enforcing
@@ -31,6 +32,7 @@ import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-system-prompt'
 
 export { SANDBOX_MODES, setSandboxMode } from './session-mode.ts'
+export { setExtraWritableRoots } from './session-extra-roots.ts'
 
 /** Preserve execution-world spelling; enforcing providers resolve filesystem identity on their host. */
 function resolveWorkspaceRoot(path: string): string {
@@ -43,8 +45,12 @@ function renderPolicyContext(policy: SandboxExecutionPolicy): string {
   switch (policy.mode) {
     case 'read-only':
       return 'Current DSH file policy: read-only. Any available operation enforced by the DSH file sandbox cannot modify files in the standing mode. Do not refuse a required modification from this policy alone: try an available tool normally and follow any denial and escalation guidance it returns.'
-    case 'workspace-write':
-      return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify(policy.workspaceRoot)}. Some platform temporary areas may also be writable.`
+    case 'workspace-write': {
+      const extras = policy.extraWritableRoots === undefined || policy.extraWritableRoots.length === 0
+        ? ''
+        : ` Additional writable roots: ${JSON.stringify(policy.extraWritableRoots)}.`
+      return `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify(policy.workspaceRoot)}.${extras} Some platform temporary areas may also be writable.`
+    }
     case 'danger-full-access':
       return 'Current DSH file policy: danger-full-access. The DSH file sandbox does not restrict file modifications by available operations.'
     /* v8 ignore next 4 -- SandboxMode is a typed same-process closed union; this branch is only the static exhaustiveness guard. */
@@ -101,6 +107,17 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
   }
 }
 
+/** The extra-roots projection's state schema (state equals the public shape). */
+const extraWritableRootsStateSchema = zod.array(zod.string()).nullable()
+
+type ExtraWritableRootsState = zod.infer<typeof extraWritableRootsStateSchema>
+declare module '@deepseek-ai/dsh-session-projection/types' {
+  interface SessionProjectionStateMap {
+    /** Last logged extra-writable-roots list, or null before one (no extra roots apply at resolve time). */
+    sandboxExtraRoots: ExtraWritableRootsState
+  }
+}
+
 /**
  * The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment
  * default mode, fallback workspace root, and current request-time policy
@@ -138,6 +155,14 @@ export class SandboxPolicyService extends Service {
       apply: (state, event) => (event.type === 'sandbox/mode' ? event.data.mode : state),
     })
 
+    ctx.sessionProjections.register({
+      key: 'sandboxExtraRoots',
+      stateVersion: 1,
+      stateSchema: extraWritableRootsStateSchema,
+      init: () => null,
+      apply: (state, event) => (event.type === 'sandbox/extra-roots' ? event.data.roots : state),
+    })
+
     ctx.inject(['systemPrompt'], (scope: Context) => {
       scope.systemPrompt.context({
         name: 'sandbox:policy',
@@ -157,16 +182,22 @@ export class SandboxPolicyService extends Service {
    * mode outranks the session's last `sandbox/mode` event, which outranks the
    * deployment default. A session cwd is its workspace-write boundary; the
    * configured root is the fallback for agentless calls and sessions without a
-   * cwd.
+   * cwd. The session's last `sandbox/extra-roots` event supplies the extra
+   * writable roots; the field is absent when no event or an empty list was
+   * logged, which is exactly the single-root policy.
    * @param request - optional session and approved mode override.
    * @returns the fully resolved per-call mode and absolute workspace root.
    */
   resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy {
     const { session } = request
+    const extraRoots = session === undefined
+      ? undefined
+      : this.ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots') ?? undefined
     return {
       mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
       workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
       ...session === undefined ? {} : { sessionId: session.id },
+      ...extraRoots === undefined || extraRoots.length === 0 ? {} : { extraWritableRoots: [...extraRoots] },
     }
   }
 

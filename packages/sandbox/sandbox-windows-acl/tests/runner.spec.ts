@@ -661,4 +661,92 @@ TryOpen 'DIRECTORY' '${child}'
       expect(result.stderr).toContain('windows-acl-run: ')
     }
   }, 15_000)
+
+  it('runner-side failure: seam-managed --write-sid must repeat once per --workspace', () => {
+    const second = join(scratchRoot, 'second-workspace')
+    mkdirSync(second)
+    const tempSid = tempWriteSid(isolatedTemp)
+    const cases = [
+      // Two workspaces, one --write-sid.
+      {
+        workspaces: ['--workspace', writableDir, '--workspace', second],
+        sids: ['--write-sid', workspaceWriteSid(writableDir)],
+      },
+      // One workspace, two --write-sid flags.
+      {
+        workspaces: ['--workspace', writableDir],
+        sids: ['--write-sid', workspaceWriteSid(writableDir), '--write-sid', workspaceWriteSid(second)],
+      },
+    ]
+    for (const { workspaces, sids } of cases) {
+      const result = runRunner([
+        ...workspaces, '--temp', isolatedTemp, '--mode', 'workspace-write',
+        ...sids, '--temp-write-sid', tempSid,
+        '--', process.execPath, '-e', 'process.exit(99)',
+      ])
+      expect(result.status, `args: ${[...workspaces, ...sids].join(' ')}\nstderr: ${result.stderr}`).toBe(127)
+      expect(result.stderr).toContain('windows-acl-run: --write-sid must be given once per --workspace')
+    }
+  }, 15_000)
+
+  it('multi-root workspace-write: every repeated --workspace is writable, outside writes stay denied (self-managed)', () => {
+    const second = join(scratchRoot, 'multi-root-second')
+    mkdirSync(second)
+    const probe = [
+      "const fs = require('node:fs');",
+      "for (const [name, target] of [['FIRST', process.argv[1]], ['SECOND', process.argv[2]], ['ESCAPE', process.argv[3]]]) {",
+      "try { fs.writeFileSync(target, name); console.log(name + ': OK'); } catch { console.log(name + ': DENIED'); }",
+      '}',
+    ].join('')
+    const result = runRunner([
+      '--workspace', writableDir, '--workspace', second, '--temp', isolatedTemp, '--mode', 'workspace-write',
+      '--', process.execPath, '-e', probe,
+      join(writableDir, 'multi-first.txt'), join(second, 'multi-second.txt'), join(scratchRoot, 'multi-escaped.txt'),
+    ])
+    expect(result.status, `stderr: ${result.stderr}`).toBe(0)
+    expect(result.stdout).toContain('FIRST: OK')
+    expect(result.stdout).toContain('SECOND: OK')
+    expect(result.stdout).toContain('ESCAPE: DENIED')
+    expect(existsSync(join(scratchRoot, 'multi-escaped.txt'))).toBe(false)
+  }, 30_000)
+
+  it('multi-root seam-managed: the runner validates one caller-owned SID per workspace and grants nothing itself', () => {
+    const seamWorkspace = join(scratchRoot, 'seam-multi-workspace')
+    const seamExtra = join(scratchRoot, 'seam-multi-extra')
+    mkdirSync(seamWorkspace)
+    mkdirSync(seamExtra)
+    const privateTemp = join(isolatedTemp, 'seam-multi-temp')
+    mkdirSync(privateTemp)
+    // The caller owns ONLY the extra root's grant: the workspace write must be
+    // denied (the runner materializes nothing), the extra write must land.
+    const extraGrant = AclWriteGrant.create(workspaceWriteSid(seamExtra))
+    extraGrant.add(seamExtra, true)
+    const tempGrant = AclWriteGrant.create(tempWriteSid(privateTemp))
+    tempGrant.add(privateTemp)
+    try {
+      const probe = [
+        "const fs = require('node:fs');",
+        "for (const [name, target] of [['WORKSPACE', process.argv[1]], ['EXTRA', process.argv[2]], ['TEMP', process.argv[3]]]) {",
+        "try { fs.writeFileSync(target, name); console.log(name + ': OK'); } catch { console.log(name + ': DENIED'); }",
+        '}',
+      ].join('')
+      const result = runRunner([
+        '--workspace', seamWorkspace, '--workspace', seamExtra, '--temp', privateTemp, '--mode', 'workspace-write',
+        '--write-sid', workspaceWriteSid(seamWorkspace), '--write-sid', workspaceWriteSid(seamExtra),
+        '--temp-write-sid', tempWriteSid(privateTemp),
+        '--', process.execPath, '-e', probe,
+        join(seamWorkspace, 'w.txt'), join(seamExtra, 'e.txt'), join(privateTemp, 't.txt'),
+      ])
+      expect(result.status, `stderr: ${result.stderr}`).toBe(0)
+      expect(result.stdout).toContain('WORKSPACE: DENIED')
+      expect(result.stdout).toContain('EXTRA: OK')
+      expect(result.stdout).toContain('TEMP: OK')
+      expect(existsSync(join(seamWorkspace, 'w.txt'))).toBe(false)
+      expect(existsSync(join(seamExtra, 'e.txt'))).toBe(true)
+    } finally {
+      extraGrant.dispose()
+      tempGrant.dispose()
+      rmSync(privateTemp, { recursive: true, force: true })
+    }
+  }, 30_000)
 })

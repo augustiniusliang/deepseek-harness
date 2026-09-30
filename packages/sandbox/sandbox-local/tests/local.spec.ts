@@ -84,14 +84,29 @@ describe('profile dialects', () => {
     ])
   })
 
+  it('bwrap workspace-write with extra roots: rebinds each extra root, deduplicated against the workspace root', () => {
+    expect(bwrapProfileArgs({ ...WW, extraWritableRoots: ['/data', '/scratch'] })).toEqual([
+      '--ro-bind', '/', '/', '--dev', '/dev', '--unshare-pid', '--proc', '/proc', '--die-with-parent',
+      '--tmpfs', '/tmp', '--bind', '/ws', '/ws', '--bind', '/data', '/data', '--bind', '/scratch', '/scratch',
+    ])
+    expect(bwrapProfileArgs({ ...WW, extraWritableRoots: ['/ws'] })).toEqual(bwrapProfileArgs(WW))
+    expect(bwrapProfileArgs(RO)).toEqual(bwrapProfileArgs({ ...RO, extraWritableRoots: ['/data'] }))
+  })
+
+  it('landlock workspace-write: adds the host /tmp and the workspace root', () => {
+    expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws'])
+  })
+
   it('landlock read-only: readable tree plus a writable /dev/null, nothing else', () => {
     // /dev/null specifically, NOT /dev: a whole-/dev grant would let confined
     // commands write real host paths beneath it (/dev/shm) under read-only.
     expect(landlockProfileArgs(RO)).toEqual(['--ro', '/', '--rw', '/dev/null'])
   })
 
-  it('landlock workspace-write: adds the host /tmp and the workspace root', () => {
-    expect(landlockProfileArgs(WW)).toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws'])
+  it('landlock workspace-write with extra roots: grants each extra root read-write, deduplicated', () => {
+    expect(landlockProfileArgs({ ...WW, extraWritableRoots: ['/data', '/scratch'] }))
+      .toEqual(['--ro', '/', '--rw', '/dev/null', '--rw', '/tmp', '--rw', '/ws', '--rw', '/data', '--rw', '/scratch'])
+    expect(landlockProfileArgs({ ...WW, extraWritableRoots: ['/ws'] })).toEqual(landlockProfileArgs(WW))
   })
 
   it('seatbelt read-only: allow-default with every file write denied except the /dev/null literal', () => {
@@ -114,6 +129,16 @@ describe('profile dialects', () => {
     const grant = `(subpath "${realpathSync(tmpdir())}")`
     expect(profile).toContain(grant)
     expect(profile.split(grant)).toHaveLength(2)
+  })
+
+  it('seatbelt workspace-write grants extra writable roots through the shared canonical allow-list', () => {
+    const extra = mkdtempSync(join(tmpdir(), 'dsh-seatbelt-extra-'))
+    tempDirs.push(extra)
+    const profile = seatbeltProfileArgs({ ...WW, extraWritableRoots: [extra] })[1] as string
+    // sbplString escapes the separator on Windows; mirror it in the expectation.
+    const grant = `(subpath "${realpathSync(extra).replaceAll('\\', String.raw`\\`)}")`
+    expect(profile).toContain(grant)
+    expect(seatbeltProfileArgs({ ...WW, extraWritableRoots: [] })).toEqual(seatbeltProfileArgs(WW))
   })
 })
 

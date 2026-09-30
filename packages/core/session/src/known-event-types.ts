@@ -49,6 +49,7 @@ export const KNOWN_SESSION_EVENT_TYPES: ReadonlySet<string> = new Set([
   'plan/mode',
   'request/context',
   'request/header',
+  'sandbox/extra-roots',
   'sandbox/mode',
   'schedule/change',
   'session-log-deepseek/delivery-accepted',

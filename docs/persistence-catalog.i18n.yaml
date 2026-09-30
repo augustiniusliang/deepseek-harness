@@ -9,8 +9,8 @@
   en: e7c80d1de4d328b4
   zh: d9f368c27fd9f998
 /session-persistence-event-catalog/persistence-type-fingerprints:
-  en: 0254fc43535dfaad
-  zh: 2f592cfae60e10ac
+  en: 00adc00c16703be9
+  zh: aa886d95fccbdd02
 /session-persistence-event-catalog/event-envelope:
   en: 7ebb1a2e0dd1f916
   zh: 8946f415dda5c1b8
@@ -156,8 +156,11 @@
   en: 897d315d9a0489d2
   zh: 98726636aa3c4ae1
 /session-persistence-event-catalog/events/sandbox:
-  en: ec841ab8439335b0
-  zh: ec841ab8439335b0
+  en: 79f52d17c5bf0cdc
+  zh: 79f52d17c5bf0cdc
+/session-persistence-event-catalog/events/sandbox/sandbox-extra-roots-log-only:
+  en: 910166683f52f795
+  zh: 01767d7915f2021f
 /session-persistence-event-catalog/events/sandbox/sandbox-mode-log-only:
   en: a7d4d90d43861111
   zh: 2b87b4dcfe438bda
@@ -669,8 +672,11 @@
   en: e27772872766bd6d
   zh: e27772872766bd6d
 /session-persistence-event-catalog/resolved-persistence-types/runtime-context:
-  en: 784f0d4afdaaa472
-  zh: 784f0d4afdaaa472
+  en: 6107999368f846e8
+  zh: 6107999368f846e8
+/session-persistence-event-catalog/resolved-persistence-types/sandbox-extra-roots:
+  en: e4bda808cd6684a8
+  zh: e4bda808cd6684a8
 /session-persistence-event-catalog/resolved-persistence-types/sandbox-mode:
   en: a1db200a19cfa795
   zh: a1db200a19cfa795
@@ -1809,8 +1815,11 @@
   en: 168c2ac7db7371b4
   zh: f851223c95582eb9
 /session-persistence-event-catalog/resolved-persistence-types/role-user:
-  en: 04b34b8ffe7e7764
-  zh: a792d5371516fd9d
+  en: 11dd409855c0e735
+  zh: 0cf4ff4e434cfb93
+/session-persistence-event-catalog/resolved-persistence-types/roots:
+  en: 10e298eb32f730e1
+  zh: 2165edc2962d32b8
 /session-persistence-event-catalog/resolved-persistence-types/sessionformatversion-sessionid-throughseq:
   en: 8aaa02b06896492d
   zh: 4dd0e1ee40d8f22d
@@ -1938,8 +1947,11 @@
   en: f8addb1a01da9ca1
   zh: 4ef11ebddd302c05
 /session-persistence-event-catalog/resolved-persistence-types/type-request-header:
-  en: f34ce1d84ad0fb1e
-  zh: c1c49f37c1e33f8c
+  en: 805115997b19229c
+  zh: b60f3e36acededd9
+/session-persistence-event-catalog/resolved-persistence-types/type-sandbox-extra-roots:
+  en: b209c11724e0ba6b
+  zh: fdd5a49cfcd5efec
 /session-persistence-event-catalog/resolved-persistence-types/type-sandbox-mode:
   en: 4d2313b10fef1ff0
   zh: 3a2cd6bf870ac7d3

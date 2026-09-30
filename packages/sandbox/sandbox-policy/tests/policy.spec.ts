@@ -11,7 +11,7 @@ import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
 import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
-import SandboxPolicyService, { SANDBOX_MODES, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
+import SandboxPolicyService, { SANDBOX_MODES, setExtraWritableRoots, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderContextSnapshot, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 
@@ -247,5 +247,82 @@ describe('the sandbox/mode session kit', () => {
     const modeEvents = session.snapshotEvents().filter(e => e.type === 'sandbox/mode')
     expect(modeEvents).toHaveLength(1)
     expect(modeEvents[0]?.data).toEqual({ mode: 'danger-full-access' })
+  })
+})
+
+describe('the sandbox/extra-roots session kit', () => {
+  it('the sandboxExtraRoots projection folds to the last list, or null without one', async () => {
+    const ctx = await mounted()
+    const session = Session.create(SessionId('sess-roots-fold'))
+    expect(ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots')).toBeNull()
+    setExtraWritableRoots(session, ['/data', '/scratch'])
+    setExtraWritableRoots(session, ['/data'])
+    expect(ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots')).toEqual(['/data'])
+  })
+
+  it('setExtraWritableRoots appends exactly one sandbox/extra-roots event per change', () => {
+    const session = Session.create(SessionId('sess-roots-write'))
+    setExtraWritableRoots(session, ['/data'])
+    const rootEvents = session.snapshotEvents().filter(e => e.type === 'sandbox/extra-roots')
+    expect(rootEvents).toHaveLength(1)
+    expect(rootEvents[0]?.data).toEqual({ roots: ['/data'] })
+  })
+
+  it('resolve() carries the folded roots and omits the field when none or an empty list was logged', async () => {
+    const ctx = await mounted({ mode: 'workspace-write', workspaceRoot: '/fallback' })
+    const bare = session('sess-roots-bare', '/projects/bare')
+    const cleared = session('sess-roots-cleared', '/projects/cleared')
+    const granted = session('sess-roots-granted', '/projects/granted')
+    setExtraWritableRoots(cleared, ['/gone'])
+    setExtraWritableRoots(cleared, [])
+    setExtraWritableRoots(granted, ['/data', '/scratch'])
+
+    expect(ctx.sandboxPolicy.resolve({ session: bare })).toEqual({
+      mode: 'workspace-write',
+      workspaceRoot: '/projects/bare',
+      sessionId: 'sess-roots-bare',
+    })
+    expect(ctx.sandboxPolicy.resolve({ session: cleared })).toEqual({
+      mode: 'workspace-write',
+      workspaceRoot: '/projects/cleared',
+      sessionId: 'sess-roots-cleared',
+    })
+    expect(ctx.sandboxPolicy.resolve({ session: granted })).toEqual({
+      mode: 'workspace-write',
+      workspaceRoot: '/projects/granted',
+      sessionId: 'sess-roots-granted',
+      extraWritableRoots: ['/data', '/scratch'],
+    })
+    // Agentless calls never carry extra roots.
+    expect(ctx.sandboxPolicy.resolve()).toEqual({
+      mode: 'workspace-write',
+      workspaceRoot: '/fallback',
+    })
+  })
+
+  it('reconstructs resumed extra roots from the session log', async () => {
+    const ctx = await mounted({ mode: 'workspace-write', workspaceRoot: '/fallback' })
+    const active = session('sess-roots-resume', '/projects/current')
+    setExtraWritableRoots(active, ['/data'])
+    const resumed = Session.create(active.id, active.snapshotEvents(), active.header)
+    expect(ctx.sandboxPolicy.resolve({ session: resumed }).extraWritableRoots).toEqual(['/data'])
+  })
+
+  it('renders the extra roots in the policy context and keeps the single-root text byte-stable without them', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: '/fallback' })
+    const active = session('sess-roots-render', '/projects/current')
+    const single = `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify('/projects/current')}. Some platform temporary areas may also be writable.`
+    expect(await policyContext(ctx, active)).toBe(single)
+
+    setExtraWritableRoots(active, ['/data', '/scratch'])
+    expect(await policyContext(ctx, active)).toBe(
+      `Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: ${JSON.stringify('/projects/current')}. Additional writable roots: ${JSON.stringify(['/data', '/scratch'])}. Some platform temporary areas may also be writable.`,
+    )
+
+    setExtraWritableRoots(active, [])
+    expect(await policyContext(ctx, active)).toBe(single)
   })
 })

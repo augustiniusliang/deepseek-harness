@@ -82,6 +82,15 @@ function flag(argv: readonly string[], name: string): string | undefined {
   return index < 0 ? undefined : argv[index + 1]
 }
 
+/** Every value a repeated flag carries, in argv order. */
+function flags(argv: readonly string[], name: string): string[] {
+  const values: string[] = []
+  for (const [index, token] of argv.entries()) {
+    if (token === name) values.push(argv[index + 1] as string)
+  }
+  return values
+}
+
 describe('windows-acl write grants (LocalSandboxProvider)', () => {
   const scratch: string[] = []
 
@@ -306,6 +315,102 @@ describe('windows-acl write grants (LocalSandboxProvider)', () => {
     } finally {
       cleanup()
     }
+  })
+
+  it('extra writable roots each get a standing grant and a repeated --workspace/--write-sid pair; reuse and teardown cover every root', async () => {
+    try {
+      const { sandbox, fiber } = await setup()
+      const ws = workspaceRoot()
+      const extra = workspaceRoot()
+      scratch.push(ws, extra)
+      const policy: SandboxPolicy = {
+        mode: 'workspace-write', workspaceRoot: ws, sessionId: SessionId('multi-root'), extraWritableRoots: [extra],
+      }
+
+      const confined = await sandbox.confine(['pwsh', '/Command', 'x'], policy)
+      const tempDir = flag(confined.argv, '--temp') ?? ''
+      const tempSid = flag(confined.argv, '--temp-write-sid')
+      expect(confined.argv).toEqual([
+        'node', 'windows-acl-runner.js',
+        '--workspace', ws,
+        '--workspace', extra,
+        '--temp', tempDir,
+        '--mode', 'workspace-write',
+        '--write-sid', WORKSPACE_SID,
+        '--write-sid', WORKSPACE_SID,
+        '--temp-write-sid', tempSid,
+        '--',
+        'pwsh', '/Command', 'x',
+      ])
+      expect(flags(confined.argv, '--workspace')).toEqual([ws, extra])
+      expect(mockState.grants).toEqual([
+        expect.objectContaining({ writeSid: WORKSPACE_SID, added: [{ path: ws, standing: true }], disposed: false }),
+        expect.objectContaining({ writeSid: WORKSPACE_SID, added: [{ path: extra, standing: true }], disposed: false }),
+        expect.objectContaining({ writeSid: tempSid, added: [{ path: tempDir, standing: false }], disposed: false }),
+      ])
+
+      // Reuse: a repeat confine materializes nothing new, an extra root
+      // aliasing the workspace root collapses into it, and widening to a new
+      // root adds only that root's standing grant.
+      expect((await sandbox.confine(['pwsh', '/Command', 'x'], policy)).argv).toEqual(confined.argv)
+      expect(mockState.grants).toHaveLength(3)
+      expect((await sandbox.confine(['pwsh', '/Command', 'x'], { ...policy, extraWritableRoots: [extra, ws] })).argv)
+        .toEqual(confined.argv)
+      expect(mockState.grants).toHaveLength(3)
+      const third = workspaceRoot()
+      scratch.push(third)
+      const widened = await sandbox.confine(['pwsh', '/Command', 'x'], { ...policy, extraWritableRoots: [extra, third] })
+      expect(flags(widened.argv, '--workspace')).toEqual([ws, extra, third])
+      expect(mockState.grants).toHaveLength(4)
+      expect(mockState.grants[3]).toEqual(
+        expect.objectContaining({ writeSid: WORKSPACE_SID, added: [{ path: third, standing: true }], disposed: false }),
+      )
+
+      await fiber.dispose()
+      expect(mockState.grants.every(grant => grant.disposed)).toBe(true)
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('read-only and agentless calls repeat --workspace for extra roots without materializing grants', async () => {
+    try {
+      const { sandbox, fiber } = await setup()
+      const readOnly = await sandbox.confine(['true'], {
+        mode: 'read-only', workspaceRoot: '/ws', sessionId: SessionId('ro-extra'), extraWritableRoots: ['/data'],
+      })
+      expect(flags(readOnly.argv, '--workspace')).toEqual(['/ws'])
+
+      const agentless = await sandbox.confine(['true'], {
+        mode: 'workspace-write', workspaceRoot: '/ws', extraWritableRoots: ['/data'],
+      })
+      expect(agentless.argv).toEqual([
+        'node', 'windows-acl-runner.js',
+        '--workspace', '/ws',
+        '--workspace', '/data',
+        '--temp', tmpdir(),
+        '--mode', 'workspace-write',
+        '--',
+        'true',
+      ])
+      expect(mockState.grants).toHaveLength(0)
+      await fiber.dispose()
+    } finally {
+      cleanup()
+    }
+  })
+
+  it('an extra root containing the ambient temp root is rejected before any ACL mutation', async () => {
+    const { sandbox } = await setup()
+    const ws = workspaceRoot()
+    scratch.push(ws)
+    await expect(sandbox.confine(['true'], {
+      mode: 'workspace-write',
+      workspaceRoot: ws,
+      sessionId: SessionId('extra-overlap'),
+      extraWritableRoots: [realpathSync.native(tmpdir())],
+    })).rejects.toThrow(/temp root must be outside the workspace/u)
+    expect(mockState.grants).toHaveLength(0)
   })
 
   it('agentless calls pass a temp root and no capabilities; the runner owns the private child lifecycle', async () => {

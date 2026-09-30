@@ -223,6 +223,47 @@ describe('AclSandbox constructor validation', () => {
       mode: 'workspace-write',
     })).toThrow(/temp write SID requires a temp directory/u)
   })
+
+  it('rejects extra write SIDs under read-only', () => {
+    const workspace = scratch()
+    const extra = scratch()
+    expect(() => new AclSandbox({
+      writableDirs: [workspace, extra],
+      tempDir: null,
+      extraWriteSids: ['S-1-4-9000-20'],
+      mode: 'read-only',
+    })).toThrow(/read-only does not accept write SIDs/u)
+  })
+
+  it('requires one write SID per writable directory under workspace-write', () => {
+    const workspace = scratch()
+    const extra = scratch()
+    expect(() => new AclSandbox({
+      writableDirs: [workspace, extra],
+      tempDir: null,
+      writeSid: 'S-1-4-9000-21',
+      mode: 'workspace-write',
+    })).toThrow(/one write SID per writable directory/u)
+    expect(() => new AclSandbox({
+      writableDirs: [workspace],
+      tempDir: null,
+      writeSid: 'S-1-4-9000-21',
+      extraWriteSids: ['S-1-4-9000-22'],
+      mode: 'workspace-write',
+    })).toThrow(/one write SID per writable directory/u)
+  })
+
+  it('rejects a write SID repeated across roots', () => {
+    const workspace = scratch()
+    const extra = scratch()
+    expect(() => new AclSandbox({
+      writableDirs: [workspace, extra],
+      tempDir: null,
+      writeSid: 'S-1-4-9000-23',
+      extraWriteSids: ['S-1-4-9000-23'],
+      mode: 'workspace-write',
+    })).toThrow(/must be distinct/u)
+  })
 })
 
 describe('AclSandbox init', () => {
@@ -240,6 +281,28 @@ describe('AclSandbox init', () => {
     await sandbox.init()
     expect(sandbox.tempDir).toBe(resolve(temp))
     expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(2)
+  })
+
+  it('multi-root: grants each writable directory under its own write SID and restricts the token on all of them', async () => {
+    const { convertStringSidToSidW, setNamedSecurityInfoW } = state.stubs as HappyStubs
+    const workspace = scratch()
+    const extra = scratch()
+    const temp = scratch()
+    const sandbox = new AclSandbox({
+      writableDirs: [workspace, extra],
+      tempDir: temp,
+      writeSid: 'S-1-4-9000-30',
+      extraWriteSids: ['S-1-4-9000-31'],
+      tempWriteSid: 'S-1-4-9000-30-1',
+      mode: 'workspace-write',
+    })
+    await sandbox.init()
+    // Every capability SID was parsed, and each grant (two standing roots +
+    // one revocable temp) applied exactly once.
+    expect(convertStringSidToSidW.mock.calls.map(call => call[0]))
+      .toEqual(['S-1-4-9000-30', 'S-1-4-9000-31', 'S-1-4-9000-30-1'])
+    expect(setNamedSecurityInfoW).toHaveBeenCalledTimes(3)
+    expect(() => { sandbox.dispose() }).not.toThrow()
   })
 
   it('requires an explicit private temp directory or null under workspace-write', () => {

@@ -49,6 +49,7 @@ The [format references](persistence-changes/historical-formats/README.md) cover 
 | `event:plan/mode` | event | `a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f` | [`{ type: "plan/mode" }`](#persistence-type-sha256-a7cf43ce7c2a4c038feed1885cd7a00d5c6ee2d90a7e0d56b46f78a3e1ca327f) |
 | `event:request/context` | event | `37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf` | [`{ type: "request/context" }`](#persistence-type-sha256-37cbc9cf06d494cfe5c67f078af1605eacb8e4c2c853e9e26455b73de0ee7ccf) |
 | `event:request/header` | event | `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41` | [`{ type: "request/header" }`](#persistence-type-sha256-4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41) |
+| `event:sandbox/extra-roots` | event | `0a9a4cb1dec83f8a3ec917498cf1386218271ce2e8f968da436c0019bb0c23b8` | [`{ type: "sandbox/extra-roots" }`](#persistence-type-sha256-0a9a4cb1dec83f8a3ec917498cf1386218271ce2e8f968da436c0019bb0c23b8) |
 | `event:sandbox/mode` | event | `516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415` | [`{ type: "sandbox/mode" }`](#persistence-type-sha256-516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415) |
 | `event:schedule/change` | event | `a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb` | [`{ type: "schedule/change" }`](#persistence-type-sha256-a0a2e5c42e1c929445ecd1cd70f49be6b66441894ec72c08e8ae332821d4a3cb) |
 | `event:session-log-deepseek/delivery-accepted` | event | `d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9` | [`{ type: "session-log-deepseek/delivery-accepted" }`](#persistence-type-sha256-d63b8b8ffad9c02fd80c43a17df4f240c1fe8118ecca9de34f9d5871838ab5b9) |
@@ -737,6 +738,26 @@ Source: [`packages/core/session/src/types.ts:402`](../packages/core/session/src/
 Source: [`packages/core/session/src/types.ts:390`](../packages/core/session/src/types.ts)
 
 ### `sandbox/*`
+
+<a id="sandboxextra-roots--log-only"></a>
+
+#### `sandbox/extra-roots` — log-only
+
+```ts persistence-catalog
+/**
+ * The session's extra writable roots were replaced — log-only (like
+ * `sandbox/mode`; NOT a surface event, carries no `surfaceOp`): durable
+ * and replayable, never in the model transcript. The LAST such event is
+ * the session's complete list (folded by the sandboxExtraRoots projection
+ * unit); an empty list clears the extra roots.
+ */
+'sandbox/extra-roots': {
+  /** The complete list of additional absolute roots `workspace-write` may write under. */
+  roots: string[]
+}
+```
+
+Source: [`packages/sandbox/sandbox-policy/src/session-extra-roots.ts:29`](../packages/sandbox/sandbox-policy/src/session-extra-roots.ts)
 
 <a id="sandboxmode--log-only"></a>
 
@@ -2298,6 +2319,14 @@ SHA-256: `34d1ab5c5df378186d6054b1a1beea9a41e41965d6f336f0bc0025c441a82e66`
 SHA-256: `24b10f7cdae64928f89c49afc2eca0af9eb4a2f135e16f3416e6b8461fef1748`
 
 `"runtime-context"`
+
+<a id="persistence-type-sha256-104cc7105cc6ac226a9ed92aa91b16706e26a49b979b7177d2e760533df68c20"></a>
+
+### `"sandbox/extra-roots"`
+
+SHA-256: `104cc7105cc6ac226a9ed92aa91b16706e26a49b979b7177d2e760533df68c20`
+
+`"sandbox/extra-roots"`
 
 <a id="persistence-type-sha256-ca085dba2c877feceebf3c62f9d39c6c2a4d2314d97b94b3927a780fe8fe2bb2"></a>
 
@@ -7491,6 +7520,18 @@ Sources: [`packages/web/web-search-deepseek/src/provider.ts:64`](../packages/web
 | `content` | required | [`tuple (1 positions)`](#persistence-type-sha256-8f6d609794bf5afc01d7ccf3e03811d32f4b8047f58a2c9a98db0154c2ad7cb9) |
 | `role` | required | `"user"` |
 
+<a id="persistence-type-sha256-d15d4040b93504587db01626f3d91ef0bc29e1b6b080d2429618bb8888a071dd"></a>
+
+### `{ roots }`
+
+SHA-256: `d15d4040b93504587db01626f3d91ef0bc29e1b6b080d2429618bb8888a071dd`
+
+Sources: [`packages/sandbox/sandbox-policy/src/session-extra-roots.ts:29`](../packages/sandbox/sandbox-policy/src/session-extra-roots.ts)
+
+| Property | Presence | Type |
+|---|---|---|
+| `roots` | required | [`string[]`](#persistence-type-sha256-93c33d9687613293f8c95d46c4d922fe9ceae83b84c384beff5c3315abe005f2) |
+
 <a id="persistence-type-sha256-8bb8c3751a6ce64b61aba1ec7ae798c00a5803c4d868a0430873216c6569ed52"></a>
 
 ### `{ sessionFormatVersion?, sessionId, throughSeq }`
@@ -8148,6 +8189,22 @@ SHA-256: `4208123b50df5006b181481ab45fcf1cde807b88d3fd4d340090bc2e202fac41`
 | `seq` | required | `number` |
 | `time` | required | `number` |
 | `type` | required | `"request/header"` |
+
+<a id="persistence-type-sha256-0a9a4cb1dec83f8a3ec917498cf1386218271ce2e8f968da436c0019bb0c23b8"></a>
+
+<a id="persistence-type-eventsandboxextra-roots"></a>
+
+### `{ type: "sandbox/extra-roots" }`
+
+SHA-256: `0a9a4cb1dec83f8a3ec917498cf1386218271ce2e8f968da436c0019bb0c23b8`
+
+| Property | Presence | Type |
+|---|---|---|
+| `data` | required | [`{ roots }`](#persistence-type-sha256-d15d4040b93504587db01626f3d91ef0bc29e1b6b080d2429618bb8888a071dd) |
+| `ignorable` | optional | `true` |
+| `seq` | required | `number` |
+| `time` | required | `number` |
+| `type` | required | `"sandbox/extra-roots"` |
 
 <a id="persistence-type-sha256-516da4cdd6d2f1e5ce488e648578ca51f40e458f707b803e5b24de870e799415"></a>
 
