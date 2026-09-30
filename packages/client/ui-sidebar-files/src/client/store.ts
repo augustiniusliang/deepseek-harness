@@ -35,18 +35,19 @@ export type LevelState =
   | { readonly kind: 'failed'; readonly failure: RemoteFailure }
 
 /**
- * One tab's tree: its root, the levels it has asked for, and what is open.
+ * One tab's tree: its roots, the levels it has asked for, and what is open.
  *
- * Every path here is absolute: the root is the session's working directory as
- * the Host reports it, and a child is the parent joined with the entry name.
+ * Every path here is absolute: the roots are the session's working directory
+ * and its extra roots as the Host reports them, primary first, and a child is
+ * the parent joined with the entry name.
  */
 export interface FilesTabState {
   autoRefresh: boolean
-  /** Absolute path of the workspace root this tree is rooted at. */
-  root: string
+  /** Absolute paths of the roots this tree is rooted at, primary first; never empty. */
+  roots: readonly [string, ...string[]]
   /** Level state by absolute directory path; a path absent here was never asked for. */
   levels: Record<string, LevelState>
-  /** Expanded absolute directory paths, root included. */
+  /** Expanded absolute directory paths, roots included. */
   expanded: string[]
   /** The body's scroll offset in px, so a remounted tree comes back where the reader was. */
   scrollTop: number
@@ -73,7 +74,8 @@ function bucket(state: FilesState, tabId: TabId): FilesTabState {
 /** The tree store's write set; every action names the tab it writes. */
 type FilesActions = {
   autoRefresh: (draft: FilesState, tabId: TabId, enabled: boolean) => void
-  start: (draft: FilesState, tabId: TabId, root: string) => void
+  start: (draft: FilesState, tabId: TabId, roots: readonly [string, ...string[]]) => void
+  setRoots: (draft: FilesState, tabId: TabId, roots: readonly [string, ...string[]]) => void
   loading: (draft: FilesState, tabId: TabId, path: string) => void
   loaded: (draft: FilesState, tabId: TabId, path: string, level: DirLevel) => void
   failed: (draft: FilesState, tabId: TabId, path: string, failure: RemoteFailure) => void
@@ -81,6 +83,16 @@ type FilesActions = {
   scrolled: (draft: FilesState, tabId: TabId, scrollTop: number) => void
   reset: (draft: FilesState, tabId: TabId) => void
   forget: (draft: FilesState, tabId: TabId) => void
+}
+
+/**
+ * Whether one absolute path is a root itself or lies under it.
+ * @param path - the absolute path to classify.
+ * @param root - the absolute root.
+ * @returns `true` for the root and its descendants.
+ */
+function underRoot(path: string, root: string): boolean {
+  return path === root || path.startsWith(`${root.replace(/[/\\]+$/, '')}/`)
 }
 
 /**
@@ -96,13 +108,32 @@ export function createFilesStore(): EngineStoreHandle<FilesState, FilesActions> 
     actions: {
       autoRefresh: (d, tabId: TabId, enabled: boolean) => { bucket(d, tabId).autoRefresh = enabled },
       /**
-       * Seed one tab's tree at its workspace root, with the root expanded.
+       * Seed one tab's tree at its roots, all of them expanded.
        * @param d - draft state.
        * @param tabId - the tab being drawn.
-       * @param root - absolute path of the workspace root.
+       * @param roots - absolute paths of the roots, primary first.
        */
-      start: (d, tabId: TabId, root: string) => {
-        d.byTab[tabId] = { root, levels: {}, expanded: [root], scrollTop: 0, autoRefresh: true }
+      start: (d, tabId: TabId, roots: readonly [string, ...string[]]) => {
+        d.byTab[tabId] = { roots, levels: {}, expanded: [...roots], scrollTop: 0, autoRefresh: true }
+      },
+      /**
+       * Replace one tab's roots, keeping the levels the surviving roots own.
+       *
+       * The tree follows the Session: an extra root added or removed while the
+       * tab is open re-seeds the root set here, and every path no surviving
+       * root contains — a removed root's own listings, most of all — goes with
+       * it. A path inside a root that stayed keeps its cached level.
+       * @param d - draft state.
+       * @param tabId - the tab being drawn.
+       * @param roots - absolute paths of the roots, primary first.
+       */
+      setRoots: (d, tabId: TabId, roots: readonly [string, ...string[]]) => {
+        const state = bucket(d, tabId)
+        state.roots = roots
+        const kept = (path: string): boolean => roots.some(root => underRoot(path, root))
+        state.expanded = state.expanded.filter(kept)
+        state.levels = Object.fromEntries(Object.entries(state.levels).filter(([path]) => kept(path)))
+        for (const root of roots) if (!state.expanded.includes(root)) state.expanded.push(root)
       },
       /**
        * Mark one directory as being listed.

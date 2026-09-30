@@ -53,8 +53,9 @@ function open(
   service: WorkspaceFiles,
   path: string,
   controller = new AbortController(),
+  scope = harness.scope,
 ) {
-  const iterator = service.changes(harness.scope, path, controller.signal)[Symbol.asyncIterator]()
+  const iterator = service.changes(scope, path, controller.signal)[Symbol.asyncIterator]()
   const close = async (): Promise<void> => {
     controller.abort()
     await iterator.return?.()
@@ -378,6 +379,20 @@ describe('workspaceFiles.changes — backends and access', () => {
     const stream = open(harness.endpoint(), harness.outside)
     await expect(failureOf(stream.next())).resolves.toEqual({
       code: 'workspace-file/outside-workspace', details: { path: harness.outside },
+    })
+    expect(watch).not.toHaveBeenCalled()
+  })
+
+  it('watches a directory inside the session\'s second root, and refuses it for a single-root session', async () => {
+    const service = harness.endpoint()
+    const stream = open(service, harness.extra, undefined, harness.multiRootScope)
+    await ready(stream)
+    expect(watch.mock.calls[0]![0]).toEqual(await harness.ctx.fs.resolve(harness.extra))
+    await stream.close()
+    watch.mockClear()
+    const refused = open(service, harness.extra)
+    await expect(failureOf(refused.next())).resolves.toEqual({
+      code: 'workspace-file/outside-workspace', details: { path: harness.extra },
     })
     expect(watch).not.toHaveBeenCalled()
   })

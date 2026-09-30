@@ -51,11 +51,13 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 ### Switching a session's mode
 
-A session's mode can be switched at runtime through a UI policy control or an explicit switch; the switch is recorded in the session log and takes effect on the session's next confined call. The switch survives restart through replay, and each session keeps its own mode — two sessions never see each other's state. A switched session keeps its immutable workspace cwd as the writable boundary.
+A session's mode can be switched at runtime through a UI policy control or an explicit switch; the switch is recorded in the session log and takes effect on the session's next confined call. The switch survives restart through replay, and each session keeps its own mode — two sessions never see each other's state. A switched session keeps its immutable workspace cwd as its primary writable root; any extra writable roots it recorded stay in force.
 
 ### Switching a session's writable roots
 
-A caller that owns a multi-directory project can hand a session additional writable roots under `workspace-write`: `setExtraWritableRoots(session, roots)` records one `sandbox/extra-roots` event carrying the complete list, so the fold replaces rather than accumulates and an empty list restores the single-root boundary. Like the mode switch, the list lives in the session log, survives restart through replay, stays private to its session, and takes effect on the session's next confined call. Extra roots widen the writable allow-list only — the session's immutable cwd remains the primary root every other feature derives from (relative paths, `@`-references, project instructions, git scope). Every extra root is canonicalized and validated like the workspace root, and an extra root aliasing it collapses into it.
+A caller that owns a multi-directory project can hand a session additional writable roots under `workspace-write`: `setExtraWritableRoots(session, roots)` records one `sandbox/extra-roots` event carrying the complete list, so the fold replaces rather than accumulates and an empty list restores the single-root boundary. Like the mode switch, the list lives in the session log, survives restart through replay, stays private to its session, and takes effect on the session's next confined call. Extra roots widen the writable allow-list only — the session's immutable cwd remains the primary root: relative paths, project instructions, and git scope derive from it, while the discovery surfaces that do span every root (`@`-references and the search tools) read this same session fact. The policy layer records the list as given; the enforcing layer canonicalizes each extra root the way it canonicalizes the workspace root, and an extra root aliasing it collapses into it.
+
+The folded list is also a client-visible projection value under the same key, so a browsing consumer can show the roots beside the session's cwd without reading the log: the unit's wire view is its own state (`string[] | null`), and `@deepseek-ai/dsh-sandbox-policy/client` carries the key's declaration to client programs while `./types` serves host consumers. Host-only readers keep calling `ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots')`.
 
 ### Failures and recovery
 
@@ -90,6 +92,7 @@ The `sandbox:policy` contribution states the mode's capability-neutral file-effe
 | [`src/index.ts`](src/index.ts) | Plugin entry: `SandboxPolicyService`, `Config` schema, policy resolution and context contribution |
 | [`src/session-mode.ts`](src/session-mode.ts) | The `sandbox/mode` event, its fold, and the write path |
 | [`src/session-extra-roots.ts`](src/session-extra-roots.ts) | The `sandbox/extra-roots` event, its fold, and the write path |
+| [`src/types.ts`](src/types.ts) | The `sandboxExtraRoots` projection key and value, exported as `./types` and `./client` |
 | [`src/invariant.ts`](src/invariant.ts) | Invariant companion: rejects `sandbox/mode` values outside the closed vocabulary and non-string `sandbox/extra-roots` roots |
 
 </details>
@@ -151,7 +154,7 @@ The stable system prompt remains byte-identical across mode changes. A changed f
 
 These limits define the policy surface this package provides. They are current package constraints, not a general sandbox comparison or a task backlog.
 
-- **One primary workspace root per session** — policy resolves `SessionHeader.cwd` as the primary root; extra writable roots come only from a session's own `sandbox/extra-roots` event, never from deployment config, and they widen the writable allow-list without changing the cwd every other feature derives from.
+- **One primary workspace root per session** — policy resolves `SessionHeader.cwd` as the primary root; extra writable roots come only from a session's own `sandbox/extra-roots` event, never from deployment config, and they widen the writable allow-list while the cwd stays the primary root that relative paths, project instructions, and git scope derive from.
 - **File-effect modes only** — `SandboxMode` governs file effects; network and process policy are outside its vocabulary, so no knob here restricts them.
 - **Temporary areas are deliberately summarized** — enforcing backends grant different platform temporary areas, which are selected after policy resolution and therefore cannot be enumerated truthfully in the current context.
 

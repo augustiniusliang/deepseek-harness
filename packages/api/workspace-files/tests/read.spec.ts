@@ -37,6 +37,15 @@ async function lateNul(): Promise<void> {
 }
 
 describe('workspaceFiles.read — the happy path', () => {
+  it('pages a file under the session\'s second root, reached by its absolute path', async () => {
+    const extra = join(harness.extra, 'notes.md')
+    await writeFile(extra, 'first\nsecond\n', 'utf8')
+    const page = await endpoint().read(harness.multiRootScope, extra, { offset: 2 }, signal())
+    expect(page.text).toBe('second')
+    expect(page.absolutePath).toBe(extra)
+    expect(page.lines).toBe(1)
+  })
+
   it('returns the whole file as one page with its absolute path, version, and byte size', async () => {
     await writeFile(join(workspace, 'notes.txt'), 'hello\nworld\n', 'utf8')
     const result = await endpoint().read(harness.scope, 'notes.txt', {}, signal())

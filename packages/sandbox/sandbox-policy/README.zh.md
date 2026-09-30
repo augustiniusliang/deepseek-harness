@@ -51,7 +51,13 @@ kind: "package-reference"
 
 ### 切换会话模式
 
-会话的模式可以在运行时通过 UI 策略控件或显式切换来更改；切换记录在会话日志中，并在该会话的下一次受限调用时生效。切换通过回放跨重启保留，每个会话保持自己的模式——两个会话绝不会看到彼此状态。切换后的会话继续以不可变的工作区 cwd 作为写入边界。
+会话的模式可以在运行时通过 UI 策略控件或显式切换来更改；切换记录在会话日志中，并在该会话的下一次受限调用时生效。切换通过回放跨重启保留，每个会话保持自己的模式——两个会话绝不会看到彼此状态。切换后的会话继续以不可变的工作区 cwd 作为主要可写根目录；它已记录的额外可写根目录保持生效。
+
+### 切换会话的可写根目录
+
+拥有多目录项目的调用方可以在 `workspace-write` 下为会话交付额外的可写根目录：`setExtraWritableRoots(session, roots)` 记录一条携带完整列表的 `sandbox/extra-roots` 事件，因此折叠是替换而非累加，空列表会恢复单根边界。与模式切换一样，该列表位于会话日志中，通过回放跨重启保留，仅对其所属会话可见，并在该会话的下一次受限调用时生效。额外根目录只拓宽可写白名单——会话的不可变 cwd 仍是主要根目录：相对路径、项目指令与 git 范围由它派生，而确实跨全部根目录的发现能力（`@` 引用与检索工具）读取的正是同一份会话事实。策略层按原样记录该列表；执行层像规范化工作区根目录那样规范化每个额外根目录，与工作区根目录指向同一位置的额外根目录会并入其中。
+
+折叠出的列表也是同一键下对 Client 可见的投影值，因此浏览类消费方无需读取日志，就能在会话 cwd 旁显示这些根目录：该单元的线路视图即它自己的状态（`string[] | null`），`@deepseek-ai/dsh-sandbox-policy/client` 把该键的声明带给 Client 程序，而 `./types` 服务于 Host 消费方。仅 Host 的读取方继续调用 `ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots')`。
 
 ### 失败与恢复
 
@@ -69,15 +75,15 @@ kind: "package-reference"
 
 ### 解析优先级
 
-`resolve({ session, mode })` 返回一份完整的逐调用策略：已批准的显式模式优先于会话最后一条 `sandbox/mode` 事件，后者又优先于部署默认值。会话的不可变 `cwd` 提供工作区根目录；否则使用配置的回退值。执行环境中的绝对路径写法保持不变。执行限制的提供方在自己的文件系统上规范化根目录，因此远端 `symlink/..` 路径绝不会在 Harness 主机上解析。
+`resolve({ session, mode })` 返回一份完整的逐调用策略：已批准的显式模式优先于会话最后一条 `sandbox/mode` 事件，后者又优先于部署默认值。会话的不可变 `cwd` 提供工作区根目录；否则使用配置的回退值。会话最后一条 `sandbox/extra-roots` 事件提供其额外可写根目录；没有该事件或记录的是空列表时，该字段缺席——正是单根策略。执行环境中的绝对路径写法保持不变。执行限制的提供方在自己的文件系统上规范化各根目录，因此远端 `symlink/..` 路径绝不会在 Harness 主机上解析。
 
 ### 逐会话存储
 
-运行时切换是在对应会话日志中追加的一条仅写入日志的 `sandbox/mode` 事件——切换本身就是事件，任何机制都不会在带外修改模式状态。`effective = explicit grant ?? fold(events) ?? deployment default`，因此覆盖通过回放跨重启保留，两个会话也绝不会看到彼此状态。工作区标识无需事件：创建时记录的不可变 `SessionHeader.cwd` 是该会话每次调用使用的根。事件仍只进入日志；在每次请求前，归属方会把当前事实贡献给完整运行时上下文快照，agent loop（智能体循环）将该快照记录为一条带来源的 `user/message`。
+运行时切换是在对应会话日志中追加的一条仅写入日志的 `sandbox/mode` 事件——切换本身就是事件，任何机制都不会在带外修改模式状态。`effective = explicit grant ?? fold(events) ?? deployment default`，因此覆盖通过回放跨重启保留，两个会话也绝不会看到彼此状态。工作区标识无需事件：创建时记录的不可变 `SessionHeader.cwd` 是该会话每次调用使用的根，而额外可写根目录是第二组仅写入日志的机制——每次变更一条 `sandbox/extra-roots` 事件，由它自己的投影单元折叠为 `sandboxExtraRoots`——绝不是部署配置。这些事件仍只进入日志；在每次请求前，归属方会把当前事实贡献给完整运行时上下文快照，agent loop（智能体循环）将该快照记录为一条带来源的 `user/message`。
 
 ### 模型可见文本
 
-`sandbox:policy` 贡献说明该模式与具体能力无关的文件操作约定，以及 `workspace-write` 下已记录的会话工作区。它不枚举已挂载能力；工具插件保留特定于操作的拒绝与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。可选的 `./invariant` 配套组件会拒绝值超出封闭模式词汇的伪造持久 `sandbox/mode` 事件。
+`sandbox:policy` 贡献说明该模式与具体能力无关的文件操作约定，以及 `workspace-write` 下已记录的会话工作区，并在会话存在额外可写根目录时追加它们。它不枚举已挂载能力；工具插件保留特定于操作的拒绝与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。可选的 `./invariant` 配套组件会拒绝值超出封闭模式词汇的伪造持久 `sandbox/mode` 事件，以及 roots 不是字符串列表的伪造 `sandbox/extra-roots` 事件。
 
 ### 源码地图
 
@@ -85,7 +91,9 @@ kind: "package-reference"
 |---|---|
 | [`src/index.ts`](src/index.ts) | 插件入口：`SandboxPolicyService`、`Config` schema、策略解析与上下文贡献 |
 | [`src/session-mode.ts`](src/session-mode.ts) | `sandbox/mode` 事件、其 fold 与写入路径 |
-| [`src/invariant.ts`](src/invariant.ts) | 不变式配套组件：拒绝超出封闭词汇的 `sandbox/mode` 值 |
+| [`src/session-extra-roots.ts`](src/session-extra-roots.ts) | `sandbox/extra-roots` 事件、其 fold 与写入路径 |
+| [`src/types.ts`](src/types.ts) | `sandboxExtraRoots` 投影键与值，以 `./types` 与 `./client` 导出 |
+| [`src/invariant.ts`](src/invariant.ts) | 不变式配套组件：拒绝超出封闭词汇的 `sandbox/mode` 值，以及非字符串的 `sandbox/extra-roots` 根目录 |
 
 </details>
 
@@ -120,8 +128,10 @@ Current DSH file policy: read-only. Any available operation enforced by the DSH 
 ##### 工作区写入
 
 ```markdown
-Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Some platform temporary areas may also be writable.
+Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Additional writable roots: ["<extra root>"]. Some platform temporary areas may also be writable.
 ```
+
+`Additional writable roots: […]` 子句仅当会话记录过非空的 `sandbox/extra-roots` 列表时出现；没有它时，文本与上面的单根形式逐字节相同，只少了该子句。
 
 ##### 完全访问
 
@@ -131,7 +141,7 @@ Current DSH file policy: danger-full-access. The DSH file sandbox does not restr
 
 #### Token 影响
 
-首次请求和有效策略每次变化时增加一条简洁的持久上下文消息；未变化的请求不增加内容。`workspace-write` 只携带已记录的会话工作区路径；平台特定的临时路径会以摘要表述，不会加入依赖主机的字节。
+首次请求和有效策略每次变化时增加一条简洁的持久上下文消息；未变化的请求不增加内容。`workspace-write` 只携带已记录的会话工作区路径以及任何额外可写根目录；平台特定的临时路径会以摘要表述，不会加入依赖主机的字节。
 
 #### KV Cache 影响
 
@@ -144,7 +154,7 @@ Current DSH file policy: danger-full-access. The DSH file sandbox does not restr
 
 这些限制界定了本包提供的策略范围。它们是当前的包级约束，并非通用沙箱对比，也不是待办事项清单。
 
-- **每个会话只有一个主要工作区根目录**——策略解析 `SessionHeader.cwd`；额外可写根目录不属于 `SandboxExecutionPolicy`。
+- **每个会话只有一个主要工作区根目录**——策略解析 `SessionHeader.cwd` 作为主要根目录；额外可写根目录只来自会话自己的 `sandbox/extra-roots` 事件，绝不来自部署配置；它们拓宽可写白名单，而 cwd 仍是相对路径、项目指令与 git 范围所派生的主要根目录。
 - **仅限文件操作模式**——`SandboxMode` 管控文件操作；网络和进程策略不在其词汇中，因此这里没有限制它们的旋钮。
 - **有意概述临时区域**——强制执行后端会授予不同的平台临时区域，这些区域在策略解析后才会选定，因此无法在当前上下文中如实枚举。
 

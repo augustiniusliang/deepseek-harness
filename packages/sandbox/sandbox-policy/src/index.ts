@@ -30,9 +30,11 @@ import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandb
 import type { Session } from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-system-prompt'
+import type { SandboxExtraRoots } from './types.ts'
 
 export { SANDBOX_MODES, setSandboxMode } from './session-mode.ts'
 export { setExtraWritableRoots } from './session-extra-roots.ts'
+export type * from './types.ts'
 
 /** Preserve execution-world spelling; enforcing providers resolve filesystem identity on their host. */
 function resolveWorkspaceRoot(path: string): string {
@@ -108,15 +110,7 @@ declare module '@deepseek-ai/dsh-session-projection/types' {
 }
 
 /** The extra-roots projection's state schema (state equals the public shape). */
-const extraWritableRootsStateSchema = zod.array(zod.string()).nullable()
-
-type ExtraWritableRootsState = zod.infer<typeof extraWritableRootsStateSchema>
-declare module '@deepseek-ai/dsh-session-projection/types' {
-  interface SessionProjectionStateMap {
-    /** Last logged extra-writable-roots list, or null before one (no extra roots apply at resolve time). */
-    sandboxExtraRoots: ExtraWritableRootsState
-  }
-}
+const extraWritableRootsStateSchema: zod.ZodType<SandboxExtraRoots> = zod.array(zod.string()).nullable()
 
 /**
  * The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment
@@ -161,6 +155,10 @@ export class SandboxPolicyService extends Service {
       stateSchema: extraWritableRootsStateSchema,
       init: () => null,
       apply: (state, event) => (event.type === 'sandbox/extra-roots' ? event.data.roots : state),
+      // State IS the wire value (the logged list, or null), and the fold
+      // returns a new list only when an event replaces it, so the registry's
+      // reference comparison publishes exactly the changes that happened.
+      wire: { viewSchema: extraWritableRootsStateSchema, view: state => state },
     })
 
     ctx.inject(['systemPrompt'], (scope: Context) => {

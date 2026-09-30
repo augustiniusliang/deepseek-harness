@@ -260,6 +260,16 @@ describe('the sandbox/extra-roots session kit', () => {
     expect(ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots')).toEqual(['/data'])
   })
 
+  it('serves the folded roots as a client-visible projection value', async () => {
+    const ctx = await mounted()
+    const session = Session.create(SessionId('sess-roots-wire'))
+    expect(ctx.sessionProjections.snapshot(session).values.sandboxExtraRoots).toBeNull()
+    setExtraWritableRoots(session, ['/data'])
+    expect(ctx.sessionProjections.snapshot(session).values.sandboxExtraRoots).toEqual(['/data'])
+    setExtraWritableRoots(session, [])
+    expect(ctx.sessionProjections.snapshot(session).values.sandboxExtraRoots).toEqual([])
+  })
+
   it('setExtraWritableRoots appends exactly one sandbox/extra-roots event per change', () => {
     const session = Session.create(SessionId('sess-roots-write'))
     setExtraWritableRoots(session, ['/data'])

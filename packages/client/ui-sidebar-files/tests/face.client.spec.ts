@@ -3,7 +3,7 @@ import { describe, expect, it, onTestFinished, vi } from 'vitest'
 import { RemoteError } from '@deepseek-ai/dsh-client-test-runtime'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { WorkspaceDirectoryListing } from '@deepseek-ai/dsh-api-workspace-files/types'
-import { childPath, createList, filesFace } from '../src/client/face.ts'
+import { childPath, createList, filesFace, sessionRoots } from '../src/client/face.ts'
 import type { WorkspaceFilesListRemote } from '../src/client/face.ts'
 import { createFilesStore } from '../src/client/store.ts'
 import type { DirLevel } from '../src/client/store.ts'
@@ -33,7 +33,7 @@ describe('filesFace', () => {
   it.each(['/', 'C:/', 'C:\\', '/work/app/'])('expands a child of the exact root key %s', async (root) => {
     const h = mount()
     const child = childPath(root, 'src')
-    h.face.start(TAB, root, h.controller.signal)
+    h.face.start(TAB, [root], h.controller.signal)
     await h.watches.ready(root)
     await h.settle({ ok: true, value: LEVEL })
     h.face.toggle(TAB, root, child, [root], h.controller.signal)
@@ -45,12 +45,12 @@ describe('filesFace', () => {
 
   it('subscribes to the root before listing it and waits for ready', async () => {
     const { face, list, watches, settle, snapshot, controller } = mount()
-    face.start(TAB, ROOT, controller.signal)
+    face.start(TAB, [ROOT], controller.signal)
     const stream = await watches.forPath(ROOT)
     expect(stream.sessionId).toBe(SESSION)
     expect(stream.signal.aborted).toBe(false)
     expect(list).not.toHaveBeenCalled()
-    expect(snapshot()).toEqual({ root: ROOT, expanded: [ROOT], levels: {}, scrollTop: 0, autoRefresh: true })
+    expect(snapshot()).toEqual({ roots: [ROOT], expanded: [ROOT], levels: {}, scrollTop: 0, autoRefresh: true })
     await stream.deliver('ready')
     expect(list).toHaveBeenCalledWith(SESSION, ROOT, stream.signal)
     expect(snapshot()!.levels[ROOT]).toEqual({ kind: 'loading' })
@@ -60,7 +60,7 @@ describe('filesFace', () => {
 
   it('records a failed listing under its level', async () => {
     const { face, watches, settle, snapshot, controller } = mount()
-    face.start(TAB, ROOT, controller.signal)
+    face.start(TAB, [ROOT], controller.signal)
     await watches.ready(ROOT)
     const error = new RemoteError('workspace-file/not-directory', 'not a directory', { path: ROOT, kind: 'file' })
     await settle({ ok: false, error })
@@ -71,7 +71,7 @@ describe('filesFace', () => {
     const { face, list, watches, settle, snapshot, controller } = mount()
     const { signal } = controller
     const child = `${ROOT}/src`
-    face.start(TAB, ROOT, signal)
+    face.start(TAB, [ROOT], signal)
     const rootStream = await watches.ready(ROOT)
     await settle({ ok: true, value: LEVEL })
     face.toggle(TAB, ROOT, child, [ROOT], signal)
@@ -111,7 +111,7 @@ describe('filesFace', () => {
     const toggle = (parent: string, path: string): void => {
       h.face.toggle(TAB, parent, path, h.snapshot()!.expanded, h.controller.signal)
     }
-    h.face.start(TAB, ROOT, h.controller.signal)
+    h.face.start(TAB, [ROOT], h.controller.signal)
     await h.watches.ready(ROOT)
     await h.settle({ ok: true, value: LEVEL })
     for (const [parent, path, level] of [[ROOT, src, srcLevel], [src, components, componentsLevel], [components, nested, empty]] as const) {
@@ -147,7 +147,7 @@ describe('filesFace', () => {
 
   it('abort forgets the bucket and a late settlement writes nothing', async () => {
     const { face, watches, settle, snapshot, controller } = mount()
-    face.start(TAB, ROOT, controller.signal)
+    face.start(TAB, [ROOT], controller.signal)
     const stream = await watches.ready(ROOT)
     controller.abort()
     expect(stream.signal.aborted).toBe(true)
@@ -159,7 +159,7 @@ describe('filesFace', () => {
 
   it('abort before ready closes the subscription without starting a listing', async () => {
     const { face, list, watches, snapshot, controller } = mount()
-    face.start(TAB, ROOT, controller.signal)
+    face.start(TAB, [ROOT], controller.signal)
     const stream = await watches.forPath(ROOT)
     controller.abort()
     await stream.released.promise
@@ -179,7 +179,7 @@ describe('filesFace', () => {
     const h = mount()
     h.face.toggle(TAB, ROOT, `${ROOT}/src`, [ROOT], h.controller.signal)
     expect(h.snapshot()).toBeUndefined()
-    h.face.start(TAB, ROOT, h.controller.signal)
+    h.face.start(TAB, [ROOT], h.controller.signal)
     const stream = await h.watches.ready(ROOT)
     await h.settle({ ok: true, value: LEVEL })
     const before = h.snapshot()
@@ -202,7 +202,7 @@ describe('filesFace', () => {
       if (level?.kind === 'ready' && level.failure !== undefined) reported.resolve(undefined)
     })
     onTestFinished(unsubscribe)
-    h.face.start(TAB, ROOT, h.controller.signal)
+    h.face.start(TAB, [ROOT], h.controller.signal)
     const stream = await h.watches.forPath(ROOT)
     stream.fail(failure)
     expect((await h.waitForList(0)).path).toBe(ROOT)
@@ -219,7 +219,7 @@ describe('filesFace', () => {
     const close = vi.spyOn(DirectoryNode.prototype, 'close')
     onTestFinished(() => { close.mockRestore() })
     const h = mount()
-    h.face.start(TAB, ROOT, h.controller.signal)
+    h.face.start(TAB, [ROOT], h.controller.signal)
     const stream = await h.watches.forPath(ROOT)
     stream.fail(new Error('watch disconnected'))
     await h.waitForList(0)
@@ -236,7 +236,7 @@ describe('filesFace', () => {
     const { face, list, watches, settle, settleLatest, snapshot, outstanding, controller } = mount()
     const { signal } = controller
     const older: DirLevel = { entries: [{ name: 'old.txt', type: 'file' }], truncated: false }
-    face.start(TAB, ROOT, signal)
+    face.start(TAB, [ROOT], signal)
     await watches.ready(ROOT)
     face.load(TAB, ROOT, signal)
     expect(list).toHaveBeenCalledTimes(2)
@@ -256,7 +256,7 @@ describe('filesFace', () => {
     const { face, watches, settle, waitForList, snapshot, controller, actions } = mount()
     const child = `${ROOT}/src`
     const collapsed = `${ROOT}/docs`
-    face.start(TAB, ROOT, controller.signal)
+    face.start(TAB, [ROOT], controller.signal)
     await watches.ready(ROOT)
     await settle({ ok: true, value: LEVEL })
     face.toggle(TAB, ROOT, child, snapshot()!.expanded, controller.signal)
@@ -278,6 +278,68 @@ describe('filesFace', () => {
     expect(snapshot()).toMatchObject({ expanded: [ROOT, child], scrollTop: 120, autoRefresh: false })
     expect(watches.opened.map(stream => stream.path)).toEqual([ROOT, child])
     expect(watches.opened.every(stream => !stream.signal.aborted)).toBe(true)
+  })
+
+  it('opens and lists a root the session logs while the tab is open, and closes one it drops', async () => {
+    const h = mount()
+    const extra = '/work/data'
+    h.face.start(TAB, [ROOT], h.controller.signal)
+    await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+
+    h.face.setRoots(TAB, [ROOT, extra], h.controller.signal)
+    expect(h.snapshot()!.roots).toEqual([ROOT, extra])
+    expect(h.snapshot()!.expanded).toEqual([ROOT, extra])
+    const extraStream = await h.watches.ready(extra)
+    expect(h.list).toHaveBeenLastCalledWith(SESSION, extra, extraStream.signal)
+    await h.settle({ ok: true, value: LEVEL })
+    expect(h.snapshot()!.levels[extra]).toEqual({ kind: 'ready', level: LEVEL })
+
+    h.face.setRoots(TAB, [ROOT], h.controller.signal)
+    expect(h.snapshot()!.roots).toEqual([ROOT])
+    expect(h.snapshot()!.expanded).toEqual([ROOT])
+    expect(h.snapshot()!.levels[extra]).toBeUndefined()
+    await extraStream.released.promise
+    expect(extraStream.signal.aborted).toBe(true)
+    expect(h.watches.opened.filter(stream => !stream.signal.aborted).map(stream => stream.path)).toEqual([ROOT])
+  })
+
+  it('keeps a root already open when the set is restated, and leaves a root row to the store', async () => {
+    const h = mount()
+    const extra = '/work/data'
+    h.face.start(TAB, [ROOT, extra], h.controller.signal)
+    const rootStream = await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+    const extraStream = await h.watches.ready(extra)
+    await h.settle({ ok: true, value: LEVEL })
+    const opened = h.watches.opened.length
+
+    h.face.setRoots(TAB, [ROOT, extra], h.controller.signal)
+    expect(h.watches.opened).toHaveLength(opened)
+    expect(rootStream.signal.aborted).toBe(false)
+
+    h.face.toggle(TAB, extra, extra, h.snapshot()!.expanded, h.controller.signal)
+    expect(h.snapshot()!.expanded).toEqual([ROOT])
+    expect(h.watches.opened).toHaveLength(opened)
+    h.face.toggle(TAB, extra, extra, h.snapshot()!.expanded, h.controller.signal)
+    expect(h.snapshot()!.expanded).toEqual([ROOT, extra])
+
+    h.face.refresh(TAB)
+    await h.settle({ ok: true, value: LEVEL })
+    await h.settle({ ok: true, value: LEVEL })
+    expect(h.list).toHaveBeenLastCalledWith(SESSION, extra, extraStream.signal)
+  })
+
+  it('writes nothing for a foreign tab and ignores re-roots after cancellation', async () => {
+    const h = mount()
+    h.face.setRoots(TAB, [ROOT], h.controller.signal)
+    expect(h.snapshot()).toBeUndefined()
+    h.face.start(TAB, [ROOT], h.controller.signal)
+    await h.watches.ready(ROOT)
+    await h.settle({ ok: true, value: LEVEL })
+    h.controller.abort()
+    h.face.setRoots(TAB, [ROOT], h.controller.signal)
+    expect(h.snapshot()).toBeUndefined()
   })
 })
 
@@ -311,5 +373,16 @@ describe('childPath', () => {
     expect(childPath('/work/app/', 'src')).toBe('/work/app/src')
     expect(childPath('/', 'etc')).toBe('/etc')
     expect(childPath('C:\\work\\', 'src')).toBe('C:\\work/src')
+  })
+})
+
+describe('sessionRoots', () => {
+  it('leads with the working directory and drops repeats of it or of one another', () => {
+    expect(sessionRoots('/work/app', null)).toEqual(['/work/app'])
+    expect(sessionRoots('/work/app', undefined)).toEqual(['/work/app'])
+    expect(sessionRoots('/work/app', [])).toEqual(['/work/app'])
+    expect(sessionRoots('/work/app', ['/work/data'])).toEqual(['/work/app', '/work/data'])
+    expect(sessionRoots('/work/app', ['/work/app', '/work/data'])).toEqual(['/work/app', '/work/data'])
+    expect(sessionRoots('/work/app', ['/work/data', '/work/data'])).toEqual(['/work/app', '/work/data'])
   })
 })

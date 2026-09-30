@@ -95,6 +95,43 @@ describe('workspaceFiles.list — the entry cap', () => {
   })
 })
 
+describe('workspaceFiles.list — the second root', () => {
+  it('lists the extra root and reports its children relative to it', async () => {
+    await mkdir(join(harness.extra, 'data', 'nested'), { recursive: true })
+    await writeFile(join(harness.extra, 'data', 'nested', 'a.ts'), 'x', 'utf8')
+    const listing = await endpoint().list(harness.multiRootScope, join(harness.extra, 'data'), signal())
+    expect(listing.path).toBe('data')
+    expect(listing.entries).toEqual([{ name: 'nested', type: 'directory' }])
+    const nested = await endpoint().list(harness.multiRootScope, join(harness.extra, 'data', 'nested'), signal())
+    expect(nested.path).toBe('data/nested')
+    expect(nested.entries.map(entry => entry.name)).toEqual(['a.ts'])
+  })
+
+  it('accepts the extra root itself and a relative path against the primary root', async () => {
+    await mkdir(join(harness.extra, 'data'))
+    await mkdir(join(workspace, 'src'))
+    const atExtra = await endpoint().list(harness.multiRootScope, harness.extra, signal())
+    expect(atExtra).toEqual({ path: '', entries: [{ name: 'data', type: 'directory' }], truncated: false })
+    const atPrimary = await endpoint().list(harness.multiRootScope, 'src', signal())
+    expect(atPrimary.path).toBe('src')
+  })
+
+  it('still refuses a directory outside every root', async () => {
+    const failure = await failureOf(endpoint().list(harness.multiRootScope, outside, signal()))
+    expect(failure.code).toBe('workspace-file/outside-workspace')
+  })
+
+  it('reports a path inside both roots relative to the primary one', async () => {
+    const nested = join(harness.workspace, 'shared')
+    await mkdir(nested)
+    await writeFile(join(nested, 'a.ts'), 'x', 'utf8')
+    const roots: [string, ...string[]] = [harness.workspace, harness.extra, nested]
+    const listing = await endpoint().list({ sessionId: harness.scope.sessionId, roots }, nested, signal())
+    expect(listing.path).toBe('shared')
+    expect(listing.entries.map(entry => entry.name)).toEqual(['a.ts'])
+  })
+})
+
 describe('workspaceFiles.list — gates', () => {
   it('rejects an absolute directory outside the workspace', async () => {
     const failure = await failureOf(endpoint().list(harness.scope, outside, signal()))

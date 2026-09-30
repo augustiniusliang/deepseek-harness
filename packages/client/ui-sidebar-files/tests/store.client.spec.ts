@@ -17,7 +17,7 @@ describe('createFilesStore', () => {
   it('mints an independent instance per call', () => {
     const first = createFilesStore().create()
     const second = createFilesStore().create()
-    first.actions.start(TAB, ROOT)
+    first.actions.start(TAB, [ROOT])
     expect(second.getSnapshot().byTab[TAB]).toBeUndefined()
   })
 
@@ -25,15 +25,15 @@ describe('createFilesStore', () => {
     const store = createFilesStore().create()
     const { actions } = store
     const getSnapshot = (): ReturnType<typeof store.getSnapshot> => store.getSnapshot()
-    actions.start(TAB, ROOT)
-    expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, levels: {}, expanded: [ROOT], scrollTop: 0, autoRefresh: true })
+    actions.start(TAB, [ROOT])
+    expect(getSnapshot().byTab[TAB]).toEqual({ roots: [ROOT], levels: {}, expanded: [ROOT], scrollTop: 0, autoRefresh: true })
   })
 
   it('shows a failed initial listing and replaces it with a successful retry', () => {
     const store = createFilesStore().create()
     const { actions } = store
     const getSnapshot = (): ReturnType<typeof store.getSnapshot> => store.getSnapshot()
-    actions.start(TAB, ROOT)
+    actions.start(TAB, [ROOT])
     actions.loading(TAB, ROOT)
     expect(getSnapshot().byTab[TAB]!.levels[ROOT]).toEqual({ kind: 'loading' })
     const failure = new RemoteError('workspace-file/not-found', 'gone', { path: ROOT })
@@ -48,7 +48,7 @@ describe('createFilesStore', () => {
   it('retains a loaded level during refresh and beside a refresh failure', () => {
     const store = createFilesStore().create()
     const { actions } = store
-    actions.start(TAB, ROOT)
+    actions.start(TAB, [ROOT])
     actions.loaded(TAB, ROOT, LEVEL)
     const cached = store.getSnapshot().byTab[TAB]!.levels[ROOT]
     actions.loading(TAB, ROOT)
@@ -65,7 +65,7 @@ describe('createFilesStore', () => {
     const { actions } = store
     const getSnapshot = (): ReturnType<typeof store.getSnapshot> => store.getSnapshot()
     const child = `${ROOT}/src`
-    actions.start(TAB, ROOT)
+    actions.start(TAB, [ROOT])
     actions.loaded(TAB, child, LEVEL)
     actions.toggled(TAB, child)
     expect(getSnapshot().byTab[TAB]!.expanded).toEqual([ROOT, child])
@@ -79,21 +79,21 @@ describe('createFilesStore', () => {
     const { actions } = store
     const getSnapshot = (): ReturnType<typeof store.getSnapshot> => store.getSnapshot()
     const child = `${ROOT}/src`
-    actions.start(TAB, ROOT)
+    actions.start(TAB, [ROOT])
     actions.loaded(TAB, ROOT, LEVEL)
     actions.toggled(TAB, child)
     actions.loaded(TAB, child, LEVEL)
     actions.scrolled(TAB, 120)
     actions.autoRefresh(TAB, false)
     actions.reset(TAB)
-    expect(getSnapshot().byTab[TAB]).toEqual({ root: ROOT, levels: {}, expanded: [ROOT, child], scrollTop: 120, autoRefresh: false })
+    expect(getSnapshot().byTab[TAB]).toEqual({ roots: [ROOT], levels: {}, expanded: [ROOT, child], scrollTop: 120, autoRefresh: false })
   })
 
   it('keeps the automatic setting independent for each tab', () => {
     const store = createFilesStore().create()
     const other = 'tab-2' as TabId
-    store.actions.start(TAB, ROOT)
-    store.actions.start(other, ROOT)
+    store.actions.start(TAB, [ROOT])
+    store.actions.start(other, [ROOT])
     store.actions.autoRefresh(TAB, false)
     expect(store.getSnapshot().byTab[TAB]!.autoRefresh).toBe(false)
     expect(store.getSnapshot().byTab[other]!.autoRefresh).toBe(true)
@@ -107,7 +107,7 @@ describe('createFilesStore', () => {
     const child = `${ROOT}/src`
     const grandchild = `${child}/nested`
     const sibling = `${ROOT}/src-other`
-    actions.start(TAB, ROOT)
+    actions.start(TAB, [ROOT])
     actions.loaded(TAB, ROOT, { entries: [
       { name: 'src', type: 'directory' }, { name: 'src-other', type: 'directory' },
     ], truncated: false })
@@ -127,9 +127,40 @@ describe('createFilesStore', () => {
   it('remembers where the body is scrolled to', () => {
     const store = createFilesStore().create()
     const { actions } = store
-    actions.start(TAB, ROOT)
+    actions.start(TAB, [ROOT])
     actions.scrolled(TAB, 120)
     expect(store.getSnapshot().byTab[TAB]!.scrollTop).toBe(120)
+  })
+
+  it('re-roots a tab on a second root, keeping the levels the surviving roots own', () => {
+    const store = createFilesStore().create()
+    const { actions } = store
+    const extra = '/work/data'
+    const nested = `${extra}/nested`
+    const child = `${ROOT}/src`
+    actions.start(TAB, [ROOT])
+    for (const path of [ROOT, child, extra, nested]) actions.loaded(TAB, path, LEVEL)
+    for (const path of [child, extra, nested]) actions.toggled(TAB, path)
+    actions.setRoots(TAB, [ROOT, extra])
+    const grown = store.getSnapshot().byTab[TAB]!
+    expect(grown.roots).toEqual([ROOT, extra])
+    expect(grown.expanded).toEqual([ROOT, child, extra, nested])
+    expect(Object.keys(grown.levels)).toEqual([ROOT, child, extra, nested])
+
+    actions.setRoots(TAB, [ROOT])
+    const shrunk = store.getSnapshot().byTab[TAB]!
+    expect(shrunk.roots).toEqual([ROOT])
+    expect(shrunk.expanded).toEqual([ROOT, child])
+    expect(Object.keys(shrunk.levels)).toEqual([ROOT, child])
+  })
+
+  it('expands a root that arrives while the tab is open', () => {
+    const store = createFilesStore().create()
+    const { actions } = store
+    actions.start(TAB, [ROOT])
+    actions.toggled(TAB, ROOT)
+    actions.setRoots(TAB, [ROOT, '/work/data'])
+    expect(store.getSnapshot().byTab[TAB]!.expanded).toEqual([ROOT, '/work/data'])
   })
 
   it('refuses to write a level for a tab that was never started', () => {
@@ -141,8 +172,8 @@ describe('createFilesStore', () => {
     const store = createFilesStore().create()
     const { actions } = store
     const getSnapshot = (): ReturnType<typeof store.getSnapshot> => store.getSnapshot()
-    actions.start(TAB, ROOT)
-    actions.start('tab-2' as TabId, ROOT)
+    actions.start(TAB, [ROOT])
+    actions.start('tab-2' as TabId, [ROOT])
     actions.forget(TAB)
     expect(Object.keys(getSnapshot().byTab)).toEqual(['tab-2'])
   })

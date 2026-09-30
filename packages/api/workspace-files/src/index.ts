@@ -4,11 +4,13 @@
  * `workspaceFiles`.
  *
  * File reads follow the composed filesystem's read access, including paths
- * outside the workspace. The selected Session header supplies the base for
- * relative paths, with the sandbox policy root as its no-cwd fallback, not a
- * read-containment restriction. Directory listings and change observations
- * remain workspace-scoped. File-kind checks and configured read caps apply to
- * every preview; this service exposes no mutations.
+ * outside the workspace. The selected Session supplies the root set for its
+ * file tree — its header cwd (with the sandbox policy root as the no-cwd
+ * fallback) followed by its extra writable roots — and the first root is the
+ * base for relative paths, not a read-containment restriction. Directory
+ * listings and change observations accept a directory inside any root. File-kind
+ * checks and configured read caps apply to every preview; this service exposes
+ * no mutations.
  *
  * A page is cut from `streamText`, which decodes and rejects non-UTF-8 as it
  * goes, so the file is read only up to the first character past the page and
@@ -27,6 +29,7 @@ import type { FsDirEntry, FsInfo, FsPathInfo, FsTarget } from '@deepseek-ai/dsh-
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-persistence'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { Remote, RemoteError, TypertRemoteService, type TypertLookup } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceChangeFeed } from './changes.ts'
@@ -55,13 +58,19 @@ declare module '@deepseek-ai/cordis' {
 export interface WorkspaceFileScope {
   /** Session identity received on the wire. */
   readonly sessionId: SessionId
-  /** Session workspace root, or the deployment fallback when its header has no cwd. */
-  readonly workspaceRoot: string
+  /**
+   * Every root this Session browses, primary first and never empty: its
+   * workspace root (the header cwd, or the deployment fallback when the header
+   * has none) followed by its extra writable roots. Relative paths resolve
+   * against the first root; directory listing and directory watching accept a
+   * path inside any of them.
+   */
+  readonly roots: readonly [string, ...string[]]
 }
 
 declare module '@deepseek-ai/dsh-typert-protocol' {
   interface TypertLookupMap {
-    /** Resolve a Session id to its workspace root without loading its event body or activating an Agent. */
+    /** Resolve a Session id to its roots without loading its event body or activating an Agent. */
     workspaceFileScope: TypertLookup<WorkspaceFileScope, SessionId>
   }
 }
@@ -170,6 +179,17 @@ function workspacePathOf(rootUrl: string, targetUrl: string): string {
   return target.slice(root.length + 1).split('/').map(decodeURIComponent).join('/')
 }
 
+/**
+ * The root a scope resolves relative paths against: the first one, which every
+ * scope carries by construction.
+ * @param scope - the Session's root set.
+ * @returns the primary root.
+ */
+function primaryRoot(scope: WorkspaceFileScope): string {
+  const [primary] = scope.roots
+  return primary
+}
+
 /** Strip the resolved child target: the wire carries names and metadata only. */
 function directoryEntry(child: FsDirEntry): WorkspaceDirectoryEntry {
   return {
@@ -206,16 +226,20 @@ export class WorkspaceFiles extends TypertRemoteService {
         hostTypeSymbol: '@deepseek-ai/dsh-api-workspace-files#WorkspaceFileScope',
         wireTypeSymbol: '@deepseek-ai/dsh-session/types#SessionId',
         resolve: async (sessionId) => {
-          const live = scope.sessions.get(sessionId)?.header
+          const session = scope.sessions.get(sessionId)
+          const live = session?.header
           const stored = live === undefined
             ? await scope.get('sessionPersistence')?.stat(sessionId)
             : undefined
           const header = live ?? stored?.header
           if (header === undefined) return undefined
-          return {
-            sessionId,
-            workspaceRoot: header.cwd ?? scope.sandboxPolicy.workspaceRoot,
-          }
+          // Extra roots are a folded session-log fact, so only a live Session
+          // carries them; a cold one browses its header root alone.
+          const extraRoots = session === undefined
+            ? []
+            : scope.get('sessionProjections')?.stateOf(session, 'sandboxExtraRoots') ?? []
+          const roots: [string, ...string[]] = [header.cwd ?? scope.sandboxPolicy.workspaceRoot, ...extraRoots]
+          return { sessionId, roots }
         },
       })
     })
@@ -223,8 +247,8 @@ export class WorkspaceFiles extends TypertRemoteService {
 
   /**
    * Read one page of lines from a UTF-8 file readable by the filesystem backend.
-   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
+   * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+   * @param path - absolute path or path relative to the first root; files outside every root are allowed.
    * @param range - the line window; omitted fields take the page defaults.
    * @param signal - caller cancellation.
    * @returns the page, the file's version at the stat before it, and whether it reaches the last line.
@@ -247,8 +271,8 @@ export class WorkspaceFiles extends TypertRemoteService {
 
   /**
    * Read a complete regular file or one byte range without text decoding.
-   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - target path, absolute or workspace-relative; relative to the base file's directory when provided.
+   * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+   * @param path - target path, absolute or relative to the first root; relative to the base file's directory when provided.
    * @param options - optional base file and range; without a range the complete-file cap applies.
    * @param signal - caller cancellation.
    * @returns native bytes with the file's version and size at the preceding stat, byte offset, and EOF marker.
@@ -281,8 +305,8 @@ export class WorkspaceFiles extends TypertRemoteService {
 
   /**
    * Report one regular file's identity, version, and size without its content.
-   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
+   * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+   * @param path - absolute path or path relative to the first root; files outside every root are allowed.
    * @param signal - caller cancellation.
    * @returns the file's absolute path, current version, and byte size.
    */
@@ -293,15 +317,15 @@ export class WorkspaceFiles extends TypertRemoteService {
   }
 
   /**
-   * List the direct children of one directory inside the Session's workspace.
-   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - workspace path, absolute or relative to the workspace root.
+   * List the direct children of one directory inside one of the Session's roots.
+   * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+   * @param path - workspace path, absolute or relative to the first root.
    * @param signal - caller cancellation.
    * @returns the directory's children in the backend's stable name order, bounded by the entry cap.
    */
   @Remote
   async list(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<WorkspaceDirectoryListing> {
-    const { root, workspaceRoot, entry } = await this.inspect(workspaceFileScope, path, signal)
+    const { entry } = await this.inspect(workspaceFileScope, path, signal)
     // A final link — a Windows junction or a symlink — is listed through the
     // directory it resolves to, matching the child type `listDir` reports for
     // that entry; `read` keeps its own no-follow gate on the final component.
@@ -312,7 +336,8 @@ export class WorkspaceFiles extends TypertRemoteService {
         { path, kind: entry.type },
       )
     }
-    const target = await this.confine(root, workspaceRoot, path, signal)
+    const target = await this.ctx.fs.resolve(path, { cwd: primaryRoot(workspaceFileScope), signal })
+    const root = await this.containingRoot(workspaceFileScope.roots, target, path, signal)
     if (entry.type === 'symlink') {
       const info = await this.ctx.fs.stat(target, signal)
       if (info?.type !== 'directory') {
@@ -329,16 +354,16 @@ export class WorkspaceFiles extends TypertRemoteService {
 
   /**
    * Watch one file or a directory's direct entries in the Session's filesystem.
-   * Files use the backend's read authority; directories remain workspace-scoped.
-   * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
-   * @param path - target path; the Host determines its type and confines directories to the workspace.
+   * Files use the backend's read authority; directories are confined to the Session's roots.
+   * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+   * @param path - target path; the Host determines its type and confines directories to a root.
    * @param signal - generation cancellation.
    * @returns `ready` once the target watch is active, then current metadata for queued and live invalidations.
-   * @throws RemoteError when watching is unavailable or a directory is outside the workspace.
+   * @throws RemoteError when watching is unavailable or a directory is outside every root.
    */
   @Remote({ mode: 'stream' })
   changes(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame> {
-    return this.feed.follow(workspaceFileScope.workspaceRoot, path, signal)
+    return this.feed.follow(workspaceFileScope.roots, path, signal)
   }
 
   private async relativePath(scope: WorkspaceFileScope, baseFile: string, path: string, signal: AbortSignal): Promise<string> {
@@ -380,31 +405,34 @@ export class WorkspaceFiles extends TypertRemoteService {
   }
   /**
    * Inspect the requested path itself before resolution follows its final
-   * component. Directory containment is checked separately by `list`.
+   * component. Root containment is checked separately by `list` and the change feed.
    */
   private async inspect(
     workspaceFileScope: WorkspaceFileScope,
     path: string,
     signal: AbortSignal,
-  ): Promise<{ root: FsTarget; workspaceRoot: string; entry: FsPathInfo }> {
+  ): Promise<{ entry: FsPathInfo }> {
     if (path.length === 0) throw new RemoteError('gateway/bad-request', 'path is required', {})
-    const { workspaceRoot } = workspaceFileScope
-    const root = await this.ctx.fs.resolve(workspaceRoot, { signal })
     // Gate on the path itself before anything follows it.
-    const entry = await this.ctx.fs.lstat(path, { cwd: workspaceRoot }, signal)
+    const entry = await this.ctx.fs.lstat(path, { cwd: primaryRoot(workspaceFileScope) }, signal)
     if (entry === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })
     }
-    return { root, workspaceRoot, entry }
+    return { entry }
   }
 
-  /** Resolve an inspected path and refuse it unless the workspace contains it. */
-  private async confine(root: FsTarget, workspaceRoot: string, path: string, signal: AbortSignal): Promise<FsTarget> {
-    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
-    if (!this.ctx.fs.contains(root, target)) {
-      throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside the workspace`, { path })
+  /** Resolve one of the Session's roots and refuse it unless it contains `target`. */
+  private async containingRoot(
+    roots: readonly [string, ...string[]],
+    target: FsTarget,
+    path: string,
+    signal: AbortSignal,
+  ): Promise<FsTarget> {
+    for (const root of roots) {
+      const resolved = await this.ctx.fs.resolve(root, { signal })
+      if (this.ctx.fs.contains(resolved, target)) return resolved
     }
-    return target
+    throw new RemoteError('workspace-file/outside-workspace', `"${path}" is outside the workspace`, { path })
   }
 
   /**
@@ -417,11 +445,11 @@ export class WorkspaceFiles extends TypertRemoteService {
     path: string,
     signal: AbortSignal,
   ): Promise<{ target: FsTarget; info: FsInfo }> {
-    const { workspaceRoot, entry } = await this.inspect(workspaceFileScope, path, signal)
+    const { entry } = await this.inspect(workspaceFileScope, path, signal)
     if (entry.type !== 'file') {
       throw new RemoteError('workspace-file/not-regular-file', `"${path}" is a ${entry.type}`, { path, kind: entry.type })
     }
-    const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal })
+    const target = await this.ctx.fs.resolve(path, { cwd: primaryRoot(workspaceFileScope), signal })
     const info = await this.ctx.fs.stat(target, signal)
     if (info === undefined) {
       throw new RemoteError('workspace-file/not-found', `no entry at "${path}"`, { path })

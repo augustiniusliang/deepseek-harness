@@ -1,15 +1,17 @@
 /**
  * The tree's asynchronous half: listing directories into the store.
  *
- * The component never awaits anything. It calls `start` / `refresh` / `toggle`, and
- * this face performs the listing and writes the outcome through the store's own
- * actions — the Slot-standard `inject` shape, so the session id is resolved by
- * the framework and the write set stays the store's.
+ * The component never awaits anything. It calls `start` / `setRoots` / `refresh` /
+ * `toggle`, and this face performs the listing and writes the outcome through
+ * the store's own actions — the Slot-standard `inject` shape, so the session id
+ * is resolved by the framework and the write set stays the store's.
  *
  * The listing itself is bound here to the Client Remote face: the tree keys
  * every level by absolute path and hands the endpoint that same absolute path;
- * the endpoint answers with the directory's workspace-relative path as well,
- * which the tree has no use for and drops.
+ * the endpoint answers with the directory's path relative to its own root as
+ * well, which the tree has no use for and drops. The tree holds one open node
+ * per root of the session, so a root the session logs while the tab is open
+ * starts listing under it too.
  *
  * One level has one listing in force: asking for a level again — the reload
  * gesture, a directory reopened after a reset — retires the listing still in
@@ -112,6 +114,22 @@ export function childPath(parent: string, name: string): string {
   return `${parent.replace(/[/\\]+$/, '')}/${name}`
 }
 
+/**
+ * Every root one Session's file tree shows, primary first.
+ *
+ * The Session's working directory leads, because a relative path and a
+ * `session`-scoped file address still resolve against it; the extra roots it
+ * logged follow, minus a repeat of the primary and of one another — the folded
+ * list may name a directory twice, and two nodes for one directory would be
+ * one directory too many.
+ * @param cwd - the Session's working directory, as the Session list reports it.
+ * @param extraRoots - the session's `sandboxExtraRoots` projection value; null and undefined both mean none.
+ * @returns the roots to show, never empty.
+ */
+export function sessionRoots(cwd: string, extraRoots: readonly string[] | null | undefined): [string, ...string[]] {
+  return [cwd, ...new Set((extraRoots ?? []).filter(root => root !== cwd))]
+}
+
 /** The tree's injected business face, as the body receives it. */
 export interface FilesInjected {
   /** Refresh the open directory tree. @param tabId - owning tab. */
@@ -119,12 +137,20 @@ export interface FilesInjected {
   /** Control automatic rereads without closing watches. @param tabId - owning tab. @param enabled - automatic-refresh setting. */
   readonly setAutoRefresh: (tabId: TabId, enabled: boolean) => void
   /**
-   * Seed this tab's tree and list its root.
+   * Seed this tab's tree and list every root.
    * @param tabId - the tab being drawn.
-   * @param root - absolute path of the workspace root.
+   * @param roots - absolute paths of the roots, primary first.
    * @param signal - the tab record's lifetime.
    */
-  readonly start: (tabId: TabId, root: string, signal: AbortSignal) => void
+  readonly start: (tabId: TabId, roots: readonly [string, ...string[]], signal: AbortSignal) => void
+  /**
+   * Follow the Session's current roots, opening the added ones and closing the
+   * dropped ones. A tab that has not started yet is left to `start`.
+   * @param tabId - the tab being drawn.
+   * @param roots - absolute paths of the roots, primary first.
+   * @param signal - the tab record's lifetime.
+   */
+  readonly setRoots: (tabId: TabId, roots: readonly [string, ...string[]], signal: AbortSignal) => void
   /**
    * List one directory into the store.
    * @param tabId - the tab being drawn.
@@ -159,7 +185,16 @@ export function filesFace(
   ): FilesInjected => {
     /** Per tab, per absolute path: the listing generation a settlement must match; the latest request wins. */
     const generations = new Map<TabId, Map<string, number>>()
-    const roots = new Map<TabId, DirectoryNode>()
+    const trees = new Map<TabId, readonly DirectoryNode[]>()
+    const closeAll = (nodes: readonly DirectoryNode[] | undefined): Promise<void> =>
+      Promise.all((nodes ?? []).map(node => node.close())).then(() => undefined)
+    const nodeFor = (tabId: TabId, path: string, signal: AbortSignal): DirectoryNode => new DirectoryNode(path,
+      (child, lifetime) => load(tabId, child, lifetime),
+      (child, lifetime) => watch(sessionId, child, lifetime),
+      (child, error) => {
+        if (!signal.aborted) actions.failed(tabId, child, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
+      }, signal,
+    ).open()
     const nextGeneration = (tabId: TabId, path: string): number => {
       const byPath = generations.get(tabId) ?? new Map<string, number>()
       generations.set(tabId, byPath)
@@ -181,37 +216,49 @@ export function filesFace(
       })
     }
     return {
-      refresh: (tabId) => { void roots.get(tabId)?.refreshTree() },
+      refresh: (tabId) => { void Promise.all((trees.get(tabId) ?? []).map(node => node.refreshTree())) },
       setAutoRefresh: (tabId, enabled) => {
         actions.autoRefresh(tabId, enabled)
-        roots.get(tabId)?.setAutomatic(enabled)
+        for (const node of trees.get(tabId) ?? []) node.setAutomatic(enabled)
       },
-      start(tabId, root, signal) {
-        actions.start(tabId, root)
+      start(tabId, roots, signal) {
+        actions.start(tabId, roots)
         signal.addEventListener('abort', () => {
-          void roots.get(tabId)?.close()
-          roots.delete(tabId)
+          void closeAll(trees.get(tabId))
+          trees.delete(tabId)
           generations.delete(tabId)
           actions.forget(tabId)
         }, { once: true })
-        roots.set(tabId, new DirectoryNode(root,
-          (path, lifetime) => load(tabId, path, lifetime),
-          (path, lifetime) => watch(sessionId, path, lifetime),
-          (path, error) => {
-            if (!signal.aborted) actions.failed(tabId, path, new RemoteError('gateway/internal', error instanceof Error ? error.message : String(error), {}))
-          }, signal,
-        ).open())
+        trees.set(tabId, roots.map(root => nodeFor(tabId, root, signal)))
+      },
+      setRoots(tabId, roots, signal) {
+        if (signal.aborted) return
+        const current = trees.get(tabId)
+        if (current === undefined) return
+        actions.setRoots(tabId, roots)
+        const open = new Map(current.map(node => [node.path, node]))
+        const next = roots.map(root => open.get(root) ?? nodeFor(tabId, root, signal))
+        // A dropped root leaves the tree entirely: its watch ends and its
+        // subtree's reads are abandoned, as a collapsed directory's are.
+        for (const node of current) if (!roots.includes(node.path)) void node.close()
+        trees.set(tabId, next)
       },
       load: (tabId, path, signal) => { void load(tabId, path, signal) },
       toggle(tabId, parentPath, path, expanded, signal) {
         if (signal.aborted) return
-        const root = roots.get(tabId)
-        if (root === undefined) return
-        const parent = root.find(parentPath)
+        const tree = trees.get(tabId)
+        if (tree === undefined) return
+        // A root row toggles visibility alone: the root node IS the tree's top
+        // level, so there is no parent to open or close that path through.
+        if (tree.some(node => node.path === path)) {
+          actions.toggled(tabId, path)
+          return
+        }
+        const parent = tree.map(node => node.find(parentPath)).find(found => found !== undefined)
         if (parent === undefined && !expanded.includes(parentPath)) return
         const collapsing = expanded.includes(path)
         const next = collapsing ? expanded.filter(value => value !== path) : [...expanded, path]
-        root.setExpanded(next)
+        for (const node of tree) node.setExpanded(next)
         if (collapsing) void parent?.collapse(path)
         else parent?.expand(path, next)
         actions.toggled(tabId, path)

@@ -1,5 +1,5 @@
 ---
-description: "The right Sidebar's file-tree tab type for the dsh web client: the session workspace root listed one level at a time over the wire, opening files into the Sidebar by resource address."
+description: "The right Sidebar's file-tree tab type for the dsh web client: the session's roots — its workspace root and its extra writable roots — listed one level at a time over the wire, opening files into the Sidebar by resource address."
 kind: "package-reference"
 ---
 
@@ -9,7 +9,7 @@ English | [中文](README.zh.md)
 
 ## Summary
 
-Browse a Session's workspace tree and open files in Sidebar previews. The root and expanded directories refresh automatically from direct-entry watches; manual reload remains available. The tab is reached from the guide and claims no resource address.
+Browse a Session's roots and open files in Sidebar previews. The roots and expanded directories refresh automatically from direct-entry watches; manual reload remains available. The tab is reached from the guide and claims no resource address.
 
 ## Table of Contents
 
@@ -35,19 +35,19 @@ Source files under `src/client/`: `definition.tsx` (the type), `store.ts` (what 
 <a id="the-tree"></a>
 ## The tree
 
-The root is the session's working directory, read from `useSessions().byId[sessionId].cwd`. Filesystem roots such as `/` and Windows drive roots are valid tree roots. Every level is keyed by absolute path; a child's path is its parent's joined with the entry name by `/`. A level is listed when it is first expanded, through `remote.workspaceFiles.list(sessionId, absolutePath)` on the `@deepseek-ai/dsh-api-workspace-files` namespace; the adapter keeps the listing's entries and truncation flag and drops its workspace-relative path. Rows are ordered directories first, then by natural, case-insensitive name; dotfiles are shown like any other entry.
+The roots are the session's working directory, read from `useSessions().byId[sessionId].cwd`, followed by its extra writable roots from the `sandboxExtraRoots` projection (`useProjection`), which the Host pushes as they are logged — a root added or dropped while the tab is open re-seeds the tree without reopening it. A session with one root draws that root's children directly under the header, exactly as before; with more than one, each root gets a top row named by its folder with the full path on hover, the primary first. A relative path still resolves against the primary root. Filesystem roots such as `/` and Windows drive roots are valid tree roots. Every level is keyed by absolute path; a child's path is its parent's joined with the entry name by `/`. A level is listed when it is first expanded, through `remote.workspaceFiles.list(sessionId, absolutePath)` on the `@deepseek-ai/dsh-api-workspace-files` namespace, which accepts a directory inside any of the session's roots; the adapter keeps the listing's entries and truncation flag and drops its path relative to the containing root. Rows are ordered directories first, then by natural, case-insensitive name; dotfiles are shown like any other entry.
 
 | Entry type | Row |
 |---|---|
 | `directory` | Toggles; reopening lists again and restores still-present expanded descendants. Displayed entries remain cached while collapsed. |
-| `file` | Opens `dsh-resource://file/session/<sessionId>/<encoded path relative to the root>`, built by `fileAddressFor` from `@deepseek-ai/dsh-util-workspace-path` from the entry's absolute path and the tree's root, through `useTabInfo().tab.actions.openResource`, landing in the tab's own pane. |
+| `file` | Opens `dsh-resource://file/session/<sessionId>/<encoded path>`, built by `fileAddressFor` from `@deepseek-ai/dsh-util-workspace-path` from the entry's absolute path and the primary root, through `useTabInfo().tab.actions.openResource`, landing in the tab's own pane. A file under the primary root keeps the same root-relative address as before; a file under an extra root carries its absolute path in the same session-scoped address, which the Host resolves against the session. |
 | `other` | Shown greyed and not clickable, so the directory is reported whole. |
 
-A level cut by the endpoint's entry cap ends with a marker; an empty level says so; a level that failed shows one line per code — `workspace-file/not-found`, `outside-workspace`, `not-directory` — and the transport's own message otherwise. Reload refreshes the root and expanded levels in place, retaining displayed entries during reads instead of resetting the whole tree; collapsed levels are fetched again when they next open. A session without a working directory shows a single line instead of a tree.
+A level cut by the endpoint's entry cap ends with a marker; an empty level says so; a level that failed shows one line per code — `workspace-file/not-found`, `outside-workspace`, `not-directory` — and the transport's own message otherwise. Reload refreshes every root and expanded level in place, retaining displayed entries during reads instead of resetting the whole tree; collapsed levels are fetched again when they next open. A session without a working directory shows a single line instead of a tree.
 
-State lives in the type's own store, bucketed by tab id: `root`, `levels` (loading / ready / failed per absolute path), `expanded`, `autoRefresh`, and `scrollTop`, which the body tracks locally while scrolling and commits once when it unmounts. Because the store outlives the body, switching to another sidebar tab and back remounts the tree with its levels intact and its scroll offset restored. The owner's `signal` ends a bucket: on abort the tab is forgotten, and neither a listing that settles afterwards nor the unmount's offset commit writes anything.
+State lives in the type's own store, bucketed by tab id: `roots`, `levels` (loading / ready / failed per absolute path), `expanded`, `autoRefresh`, and `scrollTop`, which the body tracks locally while scrolling and commits once when it unmounts. Because the store outlives the body, switching to another sidebar tab and back remounts the tree with its levels intact and its scroll offset restored. The owner's `signal` ends a bucket: on abort the tab is forgotten, and neither a listing that settles afterwards nor the unmount's offset commit writes anything.
 
-Each open `DirectoryNode` owns its target watch for the Tab lifetime; collapse closes that node and its hidden descendants. Expansion changes during ancestor restoration update the store and pending nodes, so restored descendants follow the latest expansion preferences. Automatic refresh defaults to enabled; its separate toggle is hidden while state, labels, styles, and toggle logic remain. Changes received during a directory read or its completion remain pending for another refresh.
+Each open `DirectoryNode` owns its target watch for the Tab lifetime, one per root; collapse closes that node and its hidden descendants, and a root the session drops closes its node the same way while its cached levels leave the store. Expansion changes during ancestor restoration update the store and pending nodes, so restored descendants follow the latest expansion preferences. Automatic refresh defaults to enabled; its separate toggle is hidden while state, labels, styles, and toggle logic remain. Changes received during a directory read or its completion remain pending for another refresh.
 
 <a id="model-experience"></a>
 ## Model Experience
@@ -62,7 +62,7 @@ None; directory listings travel over the Remote and assemble no model request.
 
 <a id="known-limitations-and-deferred-work"></a>
 - **Listing only.** No search, artifact filter, drag-and-drop, rename, context menu, or current-file highlight.
-- **One root.** The tree is rooted at the session's working directory; there is no way to browse above it, and the Host refuses paths outside the workspace root anyway.
+- **Roots come from the Session.** The tree shows the session's working directory and the extra roots its log grants; an extra root reaches it only while the Host folds and pushes `sandboxExtraRoots` for the session, so a Host without that projection, or a cold session, shows the working directory alone.
 
 <a id="dev-note"></a>
 ### Dev Note

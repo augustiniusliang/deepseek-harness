@@ -8,7 +8,7 @@ import { RemoteError } from '@deepseek-ai/dsh-typert-protocol'
 import { afterEach, beforeEach, expect, it, vi } from 'vitest'
 import OfficeToPdf from '../src/index.ts'
 
-const scope = { sessionId: SessionId('document-test'), workspaceRoot: '/workspace' }
+const scope = { sessionId: SessionId('document-test'), roots: ['/workspace'] as [string, ...string[]] }
 const source = { absolutePath: '/workspace/report.DOCX', version: 'source-v1', bytes: 4 }
 const rawSource = { ...source, data: new Uint8Array([80, 75, 3, 4]) }
 const wireSource = { ...source, offset: 0, eof: true, data: rawSource.data }

@@ -197,7 +197,7 @@ export class OfficeToPdf extends TypertRemoteService {
       assertUnchanged(authorized)
       signal.throwIfAborted()
       const result = await this.convert({ extension, priority, source: {
-        key: brandString<OfficeSourceKey>(JSON.stringify([scope.sessionId, scope.workspaceRoot, source.absolutePath])),
+        key: brandString<OfficeSourceKey>(JSON.stringify([scope.sessionId, scope.roots[0], source.absolutePath])),
         version: source.version, ...(source.bytes === undefined ? {} : { bytes: source.bytes }),
         read: async (upstream, maxBytes) => {
           const target = await fs.resolve(source.absolutePath, { signal: upstream })

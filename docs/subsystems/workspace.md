@@ -423,8 +423,8 @@ Host Remote file reads and workspace directory observations over the composed fi
 ```ts cordis-catalog
 /**
  * Read one page of lines from a UTF-8 file readable by the filesystem backend.
- * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
- * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
+ * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+ * @param path - absolute path or path relative to the first root; files outside every root are allowed.
  * @param range - the line window; omitted fields take the page defaults.
  * @param signal - caller cancellation.
  * @returns the page, the file's version at the stat before it, and whether it reaches the last line.
@@ -433,8 +433,8 @@ Host Remote file reads and workspace directory observations over the composed fi
 
 /**
  * Read a complete regular file or one byte range without text decoding.
- * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
- * @param path - target path, absolute or workspace-relative; relative to the base file's directory when provided.
+ * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+ * @param path - target path, absolute or relative to the first root; relative to the base file's directory when provided.
  * @param options - optional base file and range; without a range the complete-file cap applies.
  * @param signal - caller cancellation.
  * @returns native bytes with the file's version and size at the preceding stat, byte offset, and EOF marker.
@@ -443,17 +443,17 @@ Host Remote file reads and workspace directory observations over the composed fi
 
 /**
  * Report one regular file's identity, version, and size without its content.
- * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
- * @param path - absolute path or path relative to the workspace root; files outside it are allowed.
+ * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+ * @param path - absolute path or path relative to the first root; files outside every root are allowed.
  * @param signal - caller cancellation.
  * @returns the file's absolute path, current version, and byte size.
  */
 @Remote async stat(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): Promise<WorkspaceFileStat>
 
 /**
- * List the direct children of one directory inside the Session's workspace.
- * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
- * @param path - workspace path, absolute or relative to the workspace root.
+ * List the direct children of one directory inside one of the Session's roots.
+ * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+ * @param path - workspace path, absolute or relative to the first root.
  * @param signal - caller cancellation.
  * @returns the directory's children in the backend's stable name order, bounded by the entry cap.
  */
@@ -461,12 +461,12 @@ Host Remote file reads and workspace directory observations over the composed fi
 
 /**
  * Watch one file or a directory's direct entries in the Session's filesystem.
- * Files use the backend's read authority; directories remain workspace-scoped.
- * @param workspaceFileScope - header-derived workspace root for the Session identity on the wire.
- * @param path - target path; the Host determines its type and confines directories to the workspace.
+ * Files use the backend's read authority; directories are confined to the Session's roots.
+ * @param workspaceFileScope - header-derived roots for the Session identity on the wire.
+ * @param path - target path; the Host determines its type and confines directories to a root.
  * @param signal - generation cancellation.
  * @returns `ready` once the target watch is active, then current metadata for queued and live invalidations.
- * @throws RemoteError when watching is unavailable or a directory is outside the workspace.
+ * @throws RemoteError when watching is unavailable or a directory is outside every root.
  */
 @Remote({ mode: 'stream' }) changes(workspaceFileScope: WorkspaceFileScope, path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame>
 ```

@@ -42,6 +42,9 @@
       "path": "../../util/workspace-path"
     },
     {
+      "path": "../../sandbox/sandbox-policy"
+    },
+    {
       "path": "../../api/workspace-files/tsconfig.client.json"
     },
     {

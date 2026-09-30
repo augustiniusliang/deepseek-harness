@@ -56,10 +56,20 @@ export interface Mounted {
   readonly tabActions: MockedTabActions
   /** Render a fresh body over the same store and face, as a tab switch remounts it. */
   readonly remount: () => RenderResult
+  /**
+   * Answer the projection seat with a new extra-roots value and re-render in
+   * place, as the Host's push frame and the renderer's subscription do.
+   * @param roots - the `sandboxExtraRoots` value the seat now reports.
+   */
+  readonly setExtraRoots: (roots: readonly string[] | null) => void
 }
 
 /** One store instance, one face, one owner share. */
-function harness(cwd: string | null, refreshShortcut?: ReturnType<FilesBodyProps['useTabInfo']>['tab']['refreshShortcut']) {
+function harness(
+  cwd: string | null,
+  refreshShortcut?: ReturnType<FilesBodyProps['useTabInfo']>['tab']['refreshShortcut'],
+  extraRoots?: readonly string[] | null,
+) {
   const instance = createFilesStore().create()
   const script = scriptedList()
   const face = filesFace(script.list, script.watch)(SESSION, instance.actions)
@@ -75,6 +85,7 @@ function harness(cwd: string | null, refreshShortcut?: ReturnType<FilesBodyProps
     close: vi.fn<SidebarRightTabActions['close']>(),
   }
   const sessions = { byId: cwd === null ? {} : { [SESSION]: { cwd } } } as unknown as SessionListState
+  const projections: Record<string, unknown> = extraRoots === undefined ? {} : { sandboxExtraRoots: extraRoots }
   const shared = {
     // A page tab's address is the shell's to mint; the body never reads it.
     useTabInfo: () => ({
@@ -89,21 +100,36 @@ function harness(cwd: string | null, refreshShortcut?: ReturnType<FilesBodyProps
     }),
     sessionId: SESSION,
     useSessions: <S,>(sel: (s: SessionListState) => S) => sel(sessions),
+    // The projection seat: the standard kit binds the key, the harness answers it.
+    useProjection: (key: string) => projections[key],
     useStore: hookOf(instance),
     actions: instance.actions,
     ...face,
     t: makeTranslate(zh),
   }
-  return { instance, script, face, controller, tabActions, shared }
+  return { instance, script, face, controller, tabActions, shared, projections }
 }
 
 /**
  * Mount the body.
  * @param cwd - the session's working directory as `useSessions` reports it; `null` for a session without one.
  * @param refreshShortcut - effective binding advertised by the tab owner.
+ * @param extraRoots - the `sandboxExtraRoots` projection value the seat answers; undefined for a session whose host folds no such key.
  */
-export function mountBody(cwd: string | null = ROOT, refreshShortcut?: ReturnType<FilesBodyProps['useTabInfo']>['tab']['refreshShortcut']): Mounted {
-  const { shared, ...hands } = harness(cwd, refreshShortcut)
+export function mountBody(
+  cwd: string | null = ROOT,
+  refreshShortcut?: ReturnType<FilesBodyProps['useTabInfo']>['tab']['refreshShortcut'],
+  extraRoots?: readonly string[] | null,
+): Mounted {
+  const { shared, projections, ...hands } = harness(cwd, refreshShortcut, extraRoots)
   const view = render(<FilesBody {...shared as unknown as FilesBodyProps} />)
-  return { ...hands, view, remount: () => render(<FilesBody {...shared as unknown as FilesBodyProps} />) }
+  return {
+    ...hands,
+    view,
+    remount: () => render(<FilesBody {...shared as unknown as FilesBodyProps} />),
+    setExtraRoots: (roots) => {
+      projections['sandboxExtraRoots'] = roots
+      view.rerender(<FilesBody {...shared as unknown as FilesBodyProps} />)
+    },
+  }
 }

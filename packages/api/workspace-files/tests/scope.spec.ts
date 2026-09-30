@@ -1,6 +1,8 @@
 import { resolve } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
+import SandboxPolicyService, { setExtraWritableRoots } from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SESSION_FORMAT_VERSION, SessionId, type SessionHeader } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import TypertRegistry from '@deepseek-ai/dsh-typert-registry'
 import { describe, expect, it, vi } from 'vitest'
 import WorkspaceFiles from '../src/index.ts'
@@ -57,10 +59,10 @@ describe('Workspace Files Session scope lookup', () => {
       })
       if (lookup === undefined) throw new Error('workspaceFileScope lookup did not register')
 
-      await expect(lookup.resolve(liveId)).resolves.toEqual({ sessionId: liveId, workspaceRoot: liveRoot })
+      await expect(lookup.resolve(liveId)).resolves.toEqual({ sessionId: liveId, roots: [liveRoot] })
       expect(stat).not.toHaveBeenCalled()
-      await expect(lookup.resolve(coldId)).resolves.toEqual({ sessionId: coldId, workspaceRoot: coldRoot })
-      await expect(lookup.resolve(fallbackId)).resolves.toEqual({ sessionId: fallbackId, workspaceRoot: fallbackRoot })
+      await expect(lookup.resolve(coldId)).resolves.toEqual({ sessionId: coldId, roots: [coldRoot] })
+      await expect(lookup.resolve(fallbackId)).resolves.toEqual({ sessionId: fallbackId, roots: [fallbackRoot] })
       await expect(lookup.resolve(missingId)).resolves.toBeUndefined()
       expect(stat.mock.calls.map(([id]) => id)).toEqual([coldId, fallbackId, missingId])
 
@@ -70,6 +72,35 @@ describe('Workspace Files Session scope lookup', () => {
       await workspaceFiles.dispose()
       await sessions.dispose()
       await typert.dispose()
+    }
+  })
+
+  it('appends a live Session\'s folded extra roots after its header root', async () => {
+    const sessionId = SessionId('live-multi-root')
+    const primary = resolve('multi-primary')
+    const extra = resolve('multi-extra')
+    const ctx = new Context()
+    ctx.provide('fs', {} as never)
+    const sessions = await ctx.plugin(SessionStore)
+    const projections = await ctx.plugin(SessionProjectionRegistry)
+    const policy = await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: resolve('fallback') })
+    const typert = await ctx.plugin(TypertRegistry)
+    const workspaceFiles = await ctx.plugin(WorkspaceFiles, CAPS)
+    try {
+      const session = ctx.sessions.create(sessionId, { meta: { cwd: primary, origin: 'subagent' } })
+      const lookup = ctx.typert.lookups.get('workspaceFileScope')
+      if (lookup === undefined) throw new Error('workspaceFileScope lookup did not register')
+      await expect(lookup.resolve(sessionId)).resolves.toEqual({ sessionId, roots: [primary] })
+      setExtraWritableRoots(session, [extra])
+      await expect(lookup.resolve(sessionId)).resolves.toEqual({ sessionId, roots: [primary, extra] })
+      setExtraWritableRoots(session, [])
+      await expect(lookup.resolve(sessionId)).resolves.toEqual({ sessionId, roots: [primary] })
+    } finally {
+      await workspaceFiles.dispose()
+      await typert.dispose()
+      await policy.dispose()
+      await projections.dispose()
+      await sessions.dispose()
     }
   })
 })

@@ -67,6 +67,67 @@ describe('FilesBody', () => {
     expect(names(view.container)).toEqual(['/src', '/.env', '/pipe', '/README.md'])
   })
 
+  it('draws one named row per root when the session has extra roots, primary first', async () => {
+    const extra = '/work/data'
+    const { view, script } = mountBody()
+    expect(view.container.querySelector('[data-files-entry="root"]')).toBeNull()
+    await act(() => script.watches.ready(ROOT))
+    await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+
+    const stated = mountBody(ROOT, undefined, [extra])
+    await act(() => stated.script.watches.ready(ROOT))
+    await act(() => stated.script.settle({ ok: true, value: ROOT_LEVEL }))
+    await act(() => stated.script.watches.ready(extra))
+    await act(() => stated.script.settle({ ok: true, value: { entries: [{ name: 'notes.md', type: 'file' }], truncated: false } }))
+
+    const rows = [...stated.view.container.querySelectorAll('[data-files-entry="root"]')]
+    expect(rows.map(row => row.getAttribute('data-files-path'))).toEqual([ROOT, extra])
+    expect(rows.map(row => row.querySelector('button')?.getAttribute('title'))).toEqual([ROOT, extra])
+    expect(rows.map(row => row.querySelector('button')?.textContent)).toEqual(['app', 'data'])
+    expect(rows.every(row => row.querySelector('button')?.getAttribute('aria-expanded') === 'true')).toBe(true)
+    expect(names(stated.view.container)).toEqual([ROOT, `${ROOT}/src`, `${ROOT}/.env`, `${ROOT}/pipe`, `${ROOT}/README.md`, extra, `${extra}/notes.md`])
+    expect(stated.view.container.querySelector('[data-files-state="tree"]')?.getAttribute('data-files-root')).toBe(ROOT)
+  })
+
+  it('collapses one root row without touching the other, and lists the other root\'s files through its own address', async () => {
+    const extra = '/work/data'
+    const { view, script, tabActions } = mountBody(ROOT, undefined, [extra])
+    await act(() => script.watches.ready(ROOT))
+    await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+    await act(() => script.watches.ready(extra))
+    await act(() => script.settle({ ok: true, value: { entries: [{ name: 'notes.md', type: 'file' }], truncated: false } }))
+
+    fireEvent.click(view.container.querySelector(`[data-files-path="${extra}/notes.md"] > button`)!)
+    // An extra root's file keeps its absolute path inside the session address,
+    // which the Host resolves against the same Session.
+    expect(tabActions.openResource).toHaveBeenCalledWith(fileAddressFor(SESSION, ROOT, `${extra}/notes.md`))
+    expect(tabActions.openResource).toHaveBeenCalledWith('dsh-resource://file/session/s-test//work/data/notes.md')
+
+    act(() => { fireEvent.click(view.container.querySelector(`[data-files-path="${extra}"] > button`)!) })
+    expect(view.container.querySelector(`[data-files-path="${extra}/notes.md"]`)).toBeNull()
+    expect(view.container.querySelector(`[data-files-path="${extra}"] > button`)?.getAttribute('aria-expanded')).toBe('false')
+    expect(view.container.querySelector(`[data-files-path="${ROOT}/src"]`)).not.toBeNull()
+  })
+
+  it('lists a root the session logs while the tab is open, without reopening it', async () => {
+    const extra = '/work/data'
+    const { view, script, instance, setExtraRoots } = mountBody(ROOT, undefined, [])
+    await act(() => script.watches.ready(ROOT))
+    await act(() => script.settle({ ok: true, value: ROOT_LEVEL }))
+    expect(view.container.querySelector('[data-files-entry="root"]')).toBeNull()
+
+    setExtraRoots([extra])
+    expect(instance.getSnapshot().byTab[TAB]!.roots).toEqual([ROOT, extra])
+    await act(() => script.watches.ready(extra))
+    await act(() => script.settle({ ok: true, value: { entries: [{ name: 'notes.md', type: 'file' }], truncated: false } }))
+    expect(names(view.container)).toContain(`${extra}/notes.md`)
+
+    setExtraRoots(null)
+    expect(instance.getSnapshot().byTab[TAB]!.roots).toEqual([ROOT])
+    expect(view.container.querySelector('[data-files-entry="root"]')).toBeNull()
+    expect(names(view.container)).toEqual([`${ROOT}/src`, `${ROOT}/.env`, `${ROOT}/pipe`, `${ROOT}/README.md`])
+  })
+
   it('marks the root path clipped while its text is wider than its box, re-reading on resize', async () => {
     class FakeResizeObserver implements ResizeObserver {
       static latest: FakeResizeObserver | undefined

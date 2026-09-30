@@ -30,13 +30,13 @@ export class WorkspaceChangeFeed {
   }
 
   /**
-   * Open one target watch; directory targets remain inside `workspaceRoot`.
-   * @param workspaceRoot - the session's workspace root path.
-   * @param path - target path, resolved relative to the workspace root; Host metadata determines its type.
+   * Open one target watch; directory targets must stay inside one of `roots`.
+   * @param roots - the session's roots, primary first.
+   * @param path - target path, resolved relative to the first root; Host metadata determines its type.
    * @param signal - generation cancellation.
    * @returns `ready` after watching starts, then current metadata for target invalidations.
    */
-  async *follow(workspaceRoot: string, path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame> {
+  async *follow(roots: readonly [string, ...string[]], path: string, signal: AbortSignal): AsyncIterable<WorkspaceFileWatchFrame> {
     signal.throwIfAborted()
     // Instrumented observations remain queued while the target resolves.
     const follower = new ChangeFollower(() => {
@@ -53,12 +53,18 @@ export class WorkspaceChangeFeed {
     let unwatch: (() => Promise<void>) | undefined
     try {
       // Setup shares cancellation, so a late resolution cannot acquire a watcher.
-      const root = await this.ctx.fs.resolve(workspaceRoot, { signal }).catch((error: unknown) => {
-        if (aborted()) return undefined
-        throw error
-      })
-      if (root === undefined || aborted() || follower.isClosed) return
-      const target = await this.ctx.fs.resolve(path, { cwd: workspaceRoot, signal }).catch((error: unknown) => {
+      const resolved: FsTarget[] = []
+      for (const root of roots) {
+        const target = await this.ctx.fs.resolve(root, { signal }).catch((error: unknown) => {
+          if (aborted()) return undefined
+          throw error
+        })
+        if (target === undefined || aborted() || follower.isClosed) return
+        resolved.push(target)
+      }
+      const insideRoot = (target: FsTarget): boolean =>
+        resolved.some(root => this.ctx.fs.contains(root, target))
+      const target = await this.ctx.fs.resolve(path, { cwd: roots[0], signal }).catch((error: unknown) => {
         if (aborted()) return undefined
         throw error
       })
@@ -68,7 +74,7 @@ export class WorkspaceChangeFeed {
           if (aborted()) return undefined
           throw error
         })
-        if (info?.type === 'directory' && !this.ctx.fs.contains(root, target)) {
+        if (info?.type === 'directory' && !insideRoot(target)) {
           throw new RemoteError('workspace-file/outside-workspace', 'Directory is outside the workspace', { path })
         }
         return info

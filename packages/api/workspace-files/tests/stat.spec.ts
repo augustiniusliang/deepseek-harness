@@ -43,14 +43,14 @@ describe('workspaceFiles.stat', () => {
     await expect(harness.endpoint().stat(harness.scope, 'notes.txt', controller.signal)).rejects.toThrow()
   })
 
-  it('resolves the workspace root and then the file under the caller\'s signal', async () => {
+  it('resolves the file under the caller\'s signal without resolving a root first', async () => {
     await writeFile(join(harness.workspace, 'notes.txt'), 'hello\n', 'utf8')
     const fs = harness.ctx.fs
     const original = fs.resolve.bind(fs)
     const spy = vi.spyOn(fs, 'resolve').mockImplementation((path, opts) => original(path, opts))
     const controller = new AbortController()
     await harness.endpoint().stat(harness.scope, 'notes.txt', controller.signal)
-    expect(spy.mock.calls.map(([, opts]) => opts?.signal)).toEqual([controller.signal, controller.signal])
+    expect(spy.mock.calls.map(([, opts]) => opts?.signal)).toEqual([controller.signal])
     spy.mockRestore()
   })
 

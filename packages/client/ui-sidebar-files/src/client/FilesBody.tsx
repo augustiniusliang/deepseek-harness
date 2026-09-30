@@ -1,14 +1,20 @@
 /**
- * The file tree's body: the session's workspace root, listed one level at a time.
+ * The file tree's body: the session's roots, listed one level at a time.
  *
  * Everything the tree keeps lives in its store, keyed by tab; everything it asks
  * for goes through its injected face. The component itself only decides what to
  * draw for each absolute path and what a click means: a directory toggles, a
  * file opens through the owner's `tabActions` for a `file:` viewer to claim, and
  * anything else is shown but refuses to open. The header uses the shared
- * PathLabel for the root, followed by reload for the expanded directories.
+ * PathLabel for the primary root, followed by reload for the expanded
+ * directories.
+ *
+ * A session with extra roots draws one row per root at the top, the primary
+ * first and each named by its folder with the full path on hover; a session
+ * with a single root keeps drawing that root's children directly, as it always
+ * has.
  */
-import { useEffect, useLayoutEffect, useRef } from 'react'
+import { useEffect, useLayoutEffect, useMemo, useRef } from 'react'
 import type { ReactNode } from 'react'
 import clsx from 'clsx'
 import type { RemoteFailure } from '@deepseek-ai/dsh-api-remotes/client'
@@ -17,9 +23,11 @@ import {
   FileTypeIcon, IconFolderCloseRegular, IconFolderOpenRegular, IconRefreshOutlineRegular, Tooltip, classifyFileType,
   IconPauseOutlineRegular, IconPlayOutlineRegular, PathLabel,
 } from '@deepseek-ai/dsh-client-ui-primitives'
-import { fileAddressFor } from '@deepseek-ai/dsh-util-workspace-path'
+import { fileAddressFor, workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
 import type { WorkspaceDirectoryEntry } from '@deepseek-ai/dsh-api-workspace-files/types'
-import { childPath } from './face.ts'
+// Type-only: merges the sandboxExtraRoots key into SessionProjectionMap for useProjection.
+import type {} from '@deepseek-ai/dsh-sandbox-policy/client'
+import { childPath, sessionRoots } from './face.ts'
 import type { FilesInjected } from './face.ts'
 import type {} from './locales.ts'
 import type { FilesTabState, createFilesStore } from './store.ts'
@@ -108,6 +116,23 @@ function Entry({ parent, entry, tree }: { parent: string; entry: WorkspaceDirect
   )
 }
 
+/**
+ * One root of a session that has more than one: its folder name on a
+ * directory-like row, the full path on hover, and its children below.
+ */
+function Root({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
+  const expanded = tree.state.expanded.includes(path)
+  return (
+    <li className={css.item} data-files-entry="root" data-files-path={path}>
+      <button type="button" className={css.row} aria-expanded={expanded} title={path} onClick={() => { tree.onToggle(path, path) }}>
+        {expanded ? <IconFolderOpenRegular className={css.icon} /> : <IconFolderCloseRegular className={css.icon} />}
+        <span className={css.name}>{workspaceTitleOf(path)}</span>
+      </button>
+      {expanded && <ul className={css.level}><Level path={path} tree={tree} /></ul>}
+    </li>
+  )
+}
+
 /** One directory's rows: its state while listing, its entries once listed. */
 function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
   const { state, t } = tree
@@ -133,14 +158,21 @@ function Level({ path, tree }: { path: string; tree: TreeContext }): ReactNode {
   )
 }
 
-/** The file tree's body: the workspace root and whatever the reader has opened under it. */
+/** The file tree's body: the session's roots and whatever the reader has opened under them. */
 export function FilesBody({
-  useTabInfo, sessionId, useSessions, useStore, actions, start, refresh, setAutoRefresh, toggle, t,
+  useTabInfo, sessionId, useSessions, useProjection, useStore, actions, start, setRoots, refresh, setAutoRefresh, toggle, t,
 }: FilesBodyProps): ReactNode {
   const { tab } = useTabInfo()
   useEffect(() => tab.actions.bindCommands({ refresh: () => { refresh(tab.id) } }), [tab.actions, tab.id, refresh])
   const { signal, actions: tabActions } = tab
   const cwd = useSessions(sessions => sessions.byId[sessionId]?.cwd)
+  // The extra roots are a folded session-log projection the Host pushes, so a
+  // root the session logs while this tab is open reaches the tree live.
+  const extraRoots = useProjection('sandboxExtraRoots')
+  const roots = useMemo(
+    () => cwd === undefined ? undefined : sessionRoots(cwd, extraRoots),
+    [cwd, extraRoots],
+  )
   const state = useStore(store => store.byTab[tab.id])
   const bodyRef = useRef<HTMLDivElement>(null)
   const scrollTopRef = useRef(0)
@@ -164,9 +196,16 @@ export function FilesBody({
   useEffect(() => {
     // A bucket gone because the record aborted must not be re-seeded by a
     // component that has not unmounted yet.
-    if (state !== undefined || cwd === undefined || signal.aborted) return
-    start(tab.id, cwd, signal)
-  }, [state, cwd, tab.id, signal, start])
+    if (state !== undefined || roots === undefined || signal.aborted) return
+    start(tab.id, roots, signal)
+  }, [state, roots, tab.id, signal, start])
+  useEffect(() => {
+    // The session's roots are the tree's, whenever they arrive: a root logged
+    // after the tree opened is listed without reopening the tab.
+    if (state === undefined || roots === undefined || signal.aborted) return
+    if (state.roots.length === roots.length && state.roots.every((root, index) => root === roots[index])) return
+    setRoots(tab.id, roots, signal)
+  }, [state, roots, tab.id, signal, setRoots])
 
   if (cwd === undefined) {
     return (
@@ -176,20 +215,23 @@ export function FilesBody({
     )
   }
   if (state === undefined) return null
+  const primary = state.roots[0]
   const tree: TreeContext = {
     state,
     onToggle: (parent, path) => { toggle(tab.id, parent, path, state.expanded, signal) },
-    // Every row is under the tree's root, so its address is session-relative.
-    onOpen: (path) => { tabActions.openResource(fileAddressFor(sessionId, state.root, path)) },
+    // Every row sits under a root, so its address resolves against the primary
+    // root the session's relative paths use; an extra root's file keeps its
+    // absolute path in the same session-scoped address.
+    onOpen: (path) => { tabActions.openResource(fileAddressFor(sessionId, primary, path)) },
     t,
   }
   const reload = (): void => {
     refresh(tab.id)
   }
   return (
-    <div className={css.root} data-files-state="tree" data-files-root={state.root}>
+    <div className={css.root} data-files-state="tree" data-files-root={primary}>
       <div className={css.header}>
-        <PathLabel path={state.root} className={css.path} data-files-path />
+        <PathLabel path={primary} className={css.path} data-files-path />
         <span hidden>
           <button type="button" className={css.tool} aria-label={t('autoRefresh')}
             aria-pressed={state.autoRefresh} data-files-auto-refresh
@@ -217,7 +259,11 @@ export function FilesBody({
         data-files-body
         onScroll={(event) => { scrollTopRef.current = event.currentTarget.scrollTop }}
       >
-        <ul className={css.level}><Level path={state.root} tree={tree} /></ul>
+        <ul className={css.level}>
+          {state.roots.length === 1
+            ? <Level path={primary} tree={tree} />
+            : state.roots.map(root => <Root key={root} path={root} tree={tree} />)}
+        </ul>
       </div>
     </div>
   )

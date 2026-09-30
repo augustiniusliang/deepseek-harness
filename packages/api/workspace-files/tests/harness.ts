@@ -18,8 +18,8 @@ import { remoteErrorOf } from '@deepseek-ai/dsh-typert-protocol'
 import { WorkspaceFiles, type Config, type WorkspaceFileScope } from '../src/index.ts'
 
 /** Build the header-derived scope that direct service calls receive after Typert lookup. */
-function fileScope(workspaceRoot: string): WorkspaceFileScope {
-  return { sessionId: SessionId('s-test'), workspaceRoot }
+function fileScope(roots: [string, ...string[]]): WorkspaceFileScope {
+  return { sessionId: SessionId('s-test'), roots }
 }
 
 export const signal = (): AbortSignal => new AbortController().signal
@@ -28,8 +28,12 @@ export const signal = (): AbortSignal => new AbortController().signal
 export interface Harness {
   readonly workspace: string
   readonly outside: string
+  /** A second root of the same Session, beside the workspace. */
+  readonly extra: string
   readonly ctx: Context
   readonly scope: WorkspaceFileScope
+  /** The same Session with `extra` as its second root. */
+  readonly multiRootScope: WorkspaceFileScope
   /**
    * The service under test, at the given caps. One per test: the service key is
    * global to the Context, so a second call with caps is a defect in the test.
@@ -39,16 +43,18 @@ export interface Harness {
 }
 
 /**
- * Create the workspace, its outside sibling, and a context with the local
- * backend rooted at the workspace.
+ * Create the workspace, its extra root, its outside sibling, and a context with
+ * the local backend rooted at the workspace.
  * @param prefix - temp directory prefix naming the suite.
  * @returns the harness; dispose it in `afterEach`.
  */
 export async function openWorkspace(prefix: string): Promise<Harness> {
   const root = await mkdtemp(join(tmpdir(), prefix))
   const workspace = join(root, 'workspace')
+  const extra = join(root, 'extra')
   const outside = join(root, 'outside')
   await mkdir(workspace, { recursive: true })
+  await mkdir(extra, { recursive: true })
   await mkdir(outside, { recursive: true })
   const ctx = new Context()
   const fiber = await ctx.plugin(LocalFileSystem, { cwd: workspace })
@@ -60,8 +66,10 @@ export async function openWorkspace(prefix: string): Promise<Harness> {
   return {
     workspace,
     outside,
+    extra,
     ctx,
-    scope: fileScope(workspace),
+    scope: fileScope([workspace]),
+    multiRootScope: fileScope([workspace, extra]),
     endpoint: (caps) => {
       if (service !== undefined) {
         if (caps !== undefined) throw new Error('the harness serves one WorkspaceFiles per test; hoist the endpoint')

@@ -130,4 +130,23 @@ it('loads the shipped Office rows with separately patched settings and authorize
       .rejects.toMatchObject({ code: 'workspace-file/not-regular-file' })
   }
   expect(render).toHaveBeenCalledOnce()
+
+  // A Session that logs an extra root browses it beside its cwd: the scope
+  // lookup folds the roots, listing accepts the extra root, and the same
+  // authorized file path serves a preview of a file under it.
+  const extraDirectory = await realpath(await mkdtemp(join(tmpdir(), 'dsh-web-extra-')))
+  onTestFinished(async () => { await rm(extraDirectory, { recursive: true, force: true }) })
+  const extraSource = join(extraDirectory, 'extra.docx')
+  await writeFile(extraSource, 'authorized OOXML')
+  session.append('sandbox/extra-roots', { roots: [extraDirectory] })
+  const scoped = await lookup.resolve(id) as WorkspaceFileScope | undefined
+  expect(scoped).toEqual({ sessionId: id, roots: [directory, extraDirectory] })
+  if (scoped === undefined) throw new Error('Expected the Session root set')
+  expect(await ctx.workspaceFiles.list(scoped, extraDirectory, signal)).toEqual({
+    path: '', entries: [{ name: 'extra.docx', type: 'file', size: 16 }], truncated: false,
+  })
+  expect(await ctx.workspaceFiles.read(scoped, extraSource, {}, signal)).toMatchObject({ text: 'authorized OOXML', eof: true })
+  expect(await ctx.officeToPdf.render(scoped, extraSource, 'foreground', signal)).toMatchObject({
+    absolutePath: extraSource, bytes: pdf.length, data: Uint8Array.from(pdf),
+  })
 })
