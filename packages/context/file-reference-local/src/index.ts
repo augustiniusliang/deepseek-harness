@@ -11,12 +11,14 @@ import FileReferenceService, {
   FILE_REFERENCE_PROMPT,
   type FileReferenceCandidate,
 } from '@deepseek-ai/dsh-file-reference'
+import type {} from '@deepseek-ai/dsh-sandbox-policy/types'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import type {} from '@deepseek-ai/dsh-tools'
 import {
   DEFAULT_FILE_SEARCH_EXCLUDED_DIRECTORIES,
   DEFAULT_FILE_SEARCH_MAX_ENTRIES,
   DEFAULT_FILE_SEARCH_MAX_RESULTS,
-  WorkspaceFileSearch,
+  WorkspaceRootsFileSearch,
   type FileSearchConfig,
 } from './search.ts'
 
@@ -25,6 +27,7 @@ export {
   DEFAULT_FILE_SEARCH_MAX_ENTRIES,
   DEFAULT_FILE_SEARCH_MAX_RESULTS,
   WorkspaceFileSearch,
+  WorkspaceRootsFileSearch,
 } from './search.ts'
 export type { FileSearchConfig } from './search.ts'
 export { FILE_REFERENCE_PROMPT } from '@deepseek-ai/dsh-file-reference'
@@ -34,7 +37,7 @@ export { activeAtToken, formatFileMention } from '@deepseek-ai/dsh-file-referenc
 export interface Config {
   /** Maximum ranked candidates returned for one query. */
   maxResults?: number
-  /** Maximum indexed files and directories per agent workspace. */
+  /** Maximum indexed files and directories per root of an agent workspace. */
   maxEntries?: number
   /** Directory basenames never traversed or offered. */
   excludedDirectories?: string[]
@@ -50,7 +53,7 @@ export class LocalFileReferenceService extends FileReferenceService {
   })
 
   private readonly config: FileSearchConfig
-  private readonly searches = new Map<Agent, WorkspaceFileSearch>()
+  private readonly searches = new Map<Agent, WorkspaceRootsFileSearch>()
   private readonly promptFibers = new Map<Agent, ReturnType<Context['inject']>>()
   private readonly promptDisposals = new Set<Promise<void>>()
 
@@ -119,10 +122,20 @@ export class LocalFileReferenceService extends FileReferenceService {
   ): Promise<FileReferenceCandidate[]> {
     let search = this.searches.get(agent)
     if (search === undefined) {
-      search = new WorkspaceFileSearch(agent.session.header.cwd ?? process.cwd(), this.config)
+      search = new WorkspaceRootsFileSearch(agent.session.header.cwd ?? process.cwd(), [], this.config)
       this.searches.set(agent, search)
     }
+    search.setExtraRoots(this.extraRootsOf(agent))
     return search.list(query, signal)
+  }
+
+  /**
+   * The agent session's extra roots, folded by the `sandboxExtraRoots` session
+   * projection. A composition without the projection registry, or without the
+   * sandbox-policy owner that registers the key, discovers the main root alone.
+   */
+  private extraRootsOf(agent: Agent): readonly string[] {
+    return this.ctx.get('sessionProjections')?.stateOf(agent.session, 'sandboxExtraRoots') ?? []
   }
 }
 

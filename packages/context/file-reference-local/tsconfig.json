@@ -24,6 +24,12 @@
       "path": "../../core/tools"
     },
     {
+      "path": "../../sandbox/sandbox-policy"
+    },
+    {
+      "path": "../../session/session-projection"
+    },
+    {
       "path": "../file-reference"
     }
   ]

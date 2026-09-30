@@ -31,6 +31,12 @@
       "path": "../../core/system-prompt"
     },
     {
+      "path": "../../sandbox/sandbox-policy"
+    },
+    {
+      "path": "../../session/session-projection"
+    },
+    {
       "path": "../../shell/shell"
     },
     {

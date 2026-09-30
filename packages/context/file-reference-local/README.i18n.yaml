@@ -9,35 +9,38 @@
   en: 9149ae1430a55ba8
   zh: 54c229b01013c4d6
 /deepseek-ai-dsh-file-reference-local/summary:
-  en: 74449d8df9ec0f95
-  zh: e32b383ddddbfdbf
+  en: 69ecfb5404951d9d
+  zh: db3de5a1265fa6fa
 /deepseek-ai-dsh-file-reference-local/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
 /deepseek-ai-dsh-file-reference-local/use-this-package:
-  en: bb3ce050657f834a
-  zh: 2e1afa3efb7a5702
+  en: 490bef908629c292
+  zh: 7a434269c91d370a
 /deepseek-ai-dsh-file-reference-local/use-this-package/enabling-the-provider:
   en: 62b9ce096fa4a94e
   zh: 53081797c34d64eb
 /deepseek-ai-dsh-file-reference-local/use-this-package/what-you-get:
   en: f74a8087c7d46e5a
   zh: af19c91b1d9a38ab
+/deepseek-ai-dsh-file-reference-local/use-this-package/several-roots:
+  en: 2ffa18a8ad8f71a2
+  zh: 5a11fecb1d81cc3f
 /deepseek-ai-dsh-file-reference-local/use-this-package/configuration:
-  en: 977d19768aebbfd4
-  zh: 35b735eac4619c6d
+  en: 0838cade3394c6b7
+  zh: e45961cc22dd1007
 /deepseek-ai-dsh-file-reference-local/understand-the-implementation:
   en: e047061055178783
   zh: da3309d34d65e965
 /deepseek-ai-dsh-file-reference-local/understand-the-implementation/design-concept:
-  en: f0023b9c833747b5
-  zh: 42aef0c0fce9ce8c
+  en: 667d41772a856c6d
+  zh: 97cc936d88b39962
 /deepseek-ai-dsh-file-reference-local/understand-the-implementation/source-map:
-  en: a04bc6a11619cae7
-  zh: 4fb1a0d04398260b
+  en: 190b6f9d8a0cd0dd
+  zh: 86ac79b8ec6c599c
 /deepseek-ai-dsh-file-reference-local/understand-the-implementation/main-flow:
-  en: bb338cacc1ef8c01
-  zh: d7ad96a5646f5444
+  en: 913bcd5e737f96a7
+  zh: 42a03891cc9315c1
 /deepseek-ai-dsh-file-reference-local/further-exploration:
   en: dcd8fda368dc28d9
   zh: 56090f8c2f84e7b0
@@ -60,8 +63,8 @@
   en: 1c3ebc786f362851
   zh: 01f43411f28d2993
 /deepseek-ai-dsh-file-reference-local/known-limitations-and-deferred-work:
-  en: 42f854dbb8d0df02
-  zh: 2045a8c0a6f69400
+  en: d17b70ee4c27a25c
+  zh: 783d013277dd7fa1
 /deepseek-ai-dsh-file-reference-local/known-limitations-and-deferred-work/dev-note:
   en: e67f633dc6fe7773
   zh: 3bb0c20c93f16f98

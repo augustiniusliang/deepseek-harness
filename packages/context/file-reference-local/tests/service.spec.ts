@@ -5,7 +5,9 @@ import { Context } from '@deepseek-ai/cordis'
 import { afterEach, describe, expect, it, vi } from 'vitest'
 import AgentRegistry from '@deepseek-ai/dsh-agent'
 import type { Agent } from '@deepseek-ai/dsh-agent'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRegistry, { defineContentToolFixture } from '@deepseek-ai/dsh-tools'
 import { FILE_REFERENCE_PROMPT } from '@deepseek-ai/dsh-file-reference'
@@ -27,11 +29,17 @@ async function harness(): Promise<Context> {
   return ctx
 }
 
+/** Mount the projection registry and the policy owner that registers the extra-roots fold. */
+async function mountExtraRoots(ctx: Context, workspaceRoot: string): Promise<void> {
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot })
+}
+
 async function stubAgent(
   ctx: Context,
   id = 'file-reference-agent',
   includeCwd = true,
-): Promise<{ agent: Agent; dispose: () => Promise<void> }> {
+): Promise<{ agent: Agent; root: string; dispose: () => Promise<void> }> {
   const root = await mkdtemp(join(tmpdir(), 'dsh-file-reference-service-'))
   roots.push(root)
   await writeFile(join(root, 'README.md'), 'readme')
@@ -51,7 +59,7 @@ async function stubAgent(
     cancel() {},
     whenIdle: () => Promise.resolve(),
   } as unknown as Agent
-  return { agent, dispose: await ctx.agents.register(agent) }
+  return { agent, root, dispose: await ctx.agents.register(agent) }
 }
 
 describe('LocalFileReferenceService', () => {
@@ -155,6 +163,45 @@ describe('LocalFileReferenceService', () => {
     await expect(ctx.fileReferences.list(agent, '', new AbortController().signal)).resolves.toEqual([])
     await expect(ctx.fileReferences.list(agent, 'src', new AbortController().signal)).resolves.toEqual([])
     expect(list).toHaveBeenCalledTimes(2)
+  })
+
+  it('serves the session\'s extra roots, displaying them absolutely', async () => {
+    const ctx = await harness()
+    const { agent, root } = await stubAgent(ctx, 'extra-roots')
+    const extra = await mkdtemp(join(tmpdir(), 'dsh-file-reference-extra-'))
+    roots.push(extra)
+    await writeFile(join(extra, 'extra-note.md'), 'extra')
+    await mountExtraRoots(ctx, root)
+    await ctx.plugin(LocalFileReferenceService, { maxResults: 5, maxEntries: 100, excludedDirectories: ['.git'] })
+
+    expect(await ctx.fileReferences.list(agent, 'extra-note', new AbortController().signal)).toEqual([])
+
+    // The project adds a folder: the next query observes the new root, and
+    // removing it drops the candidates again.
+    agent.session.append('sandbox/extra-roots', { roots: [extra] })
+    const extraNote = `${extra.replaceAll('\\', '/')}/extra-note.md`
+    await expect(ctx.fileReferences.list(agent, 'extra-note', new AbortController().signal))
+      .resolves.toEqual([{ path: extraNote, kind: 'file' }])
+    expect(await ctx.fileReferences.list(agent, '', new AbortController().signal))
+      .toContainEqual({ path: extraNote, kind: 'file' })
+
+    agent.session.append('sandbox/extra-roots', { roots: [] })
+    await expect(ctx.fileReferences.list(agent, 'extra-note', new AbortController().signal)).resolves.toEqual([])
+  })
+
+  it('discovers the main root alone without the projection registry', async () => {
+    // The single-root composition: no `ctx.sessionProjections`, so a session
+    // with logged extra roots still completes from its own workspace.
+    const ctx = await harness()
+    const { agent } = await stubAgent(ctx, 'no-projections')
+    const extra = await mkdtemp(join(tmpdir(), 'dsh-file-reference-extra-'))
+    roots.push(extra)
+    await writeFile(join(extra, 'extra-note.md'), 'extra')
+    agent.session.append('sandbox/extra-roots', { roots: [extra] })
+    await ctx.plugin(LocalFileReferenceService)
+    await expect(ctx.fileReferences.list(agent, 'extra-note', new AbortController().signal)).resolves.toEqual([])
+    await expect(ctx.fileReferences.list(agent, 'README', new AbortController().signal))
+      .resolves.toEqual([{ path: 'README.md', kind: 'file' }])
   })
 
   it('logs rejected prompt cleanup without failing service teardown', async () => {

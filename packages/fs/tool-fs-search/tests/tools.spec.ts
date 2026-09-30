@@ -13,9 +13,13 @@
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import { createScope, type Scope } from '@deepseek-ai/dsh-scope'
-import { join, sep } from 'node:path'
+import { join, resolve, sep } from 'node:path'
 import { createUserMessage, ToolCallId } from '@deepseek-ai/dsh-llm'
 import type { ContextFormed } from '@deepseek-ai/dsh-llm'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import type { Session } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderPrompt } from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH, type ToolExecution, type ToolExecutionToken } from '@deepseek-ai/dsh-tools'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
@@ -38,6 +42,7 @@ import {
   resolveRgPath,
   runRipgrep,
   sampleAcrossTopLevel,
+  skippedRootsNote,
   toWorkdirRelative,
 } from '@deepseek-ai/dsh-tool-fs-search'
 
@@ -192,6 +197,8 @@ class FakeSpill extends SpillStore {
 interface SetupOptions {
   config?: Partial<ToolFsSearch.Config>
   spill?: boolean
+  /** Mount the real session store and projection registry, and log these roots on the session. */
+  roots?: { cwd: string; extraRoots: string[] }
 }
 
 const DEFAULT_CONFIG = { sampleOverCapGlobResults: true } satisfies ToolFsSearch.Config
@@ -205,13 +212,31 @@ async function setup(options: SetupOptions = {}) {
   await ctx.plugin(FakeSubprocess)
   const subprocess = ctx.subprocess as FakeSubprocess
   if (options.spill === true) await ctx.plugin(FakeSpill)
+  const session = options.roots === undefined ? undefined : await sessionWithRoots(ctx, options.roots)
   const fiber = await ctx.plugin(ToolFsSearch, { ...DEFAULT_CONFIG, ...options.config })
   const spill = options.spill === true ? ctx.get('spillStore') as FakeSpill : undefined
-  return { ctx, subprocess, spill, fiber, warnings }
+  return { ctx, subprocess, spill, fiber, warnings, session }
+}
+
+/**
+ * A real session whose log carries `sandbox/extra-roots`, folded by the policy
+ * owner's own `sandboxExtraRoots` unit, so a multi-root search runs its
+ * production path.
+ */
+async function sessionWithRoots(ctx: Context, roots: { cwd: string; extraRoots: string[] }): Promise<Session> {
+  await ctx.plugin(SessionStore)
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: roots.cwd })
+  const session = ctx.sessions.create(SessionId('session-roots'), { meta: { cwd: roots.cwd } })
+  session.append('sandbox/extra-roots', { roots: roots.extraRoots })
+  return session
 }
 
 /** A stand-in agent whose session header carries the given cwd (and a stable id). */
 const agent = (cwd?: string) => ({ session: { header: { id: 'session-1', ...cwd !== undefined ? { cwd } : {} } } })
+
+/** The calling agent shape for a real session created over the root set. */
+const sessionAgent = (session: Session) => ({ session })
 
 let callCounter = 0
 function call(
@@ -472,7 +497,7 @@ describe('workdir derivation and signal forwarding', () => {
     const controller = new AbortController()
     controller.abort()
     const exec = { signal: controller.signal, name: 'glob', callId: ToolCallId('direct-pre-abort') } as unknown as ToolExecution
-    await expect(runRipgrep(ctx, exec, 'glob', ['--files'], 1_000_000, 3_000, 64 * 1024)).rejects
+    await expect(runRipgrep(ctx, exec, 'glob', '/w', ['--files'], { rawOutputMaxBytes: 1_000_000, graceMs: 3_000, stderrMaxBytes: 64 * 1024 })).rejects
       .toMatchObject({ name: 'SearchError', code: 'SEARCH_ABORTED' })
   })
 
@@ -543,6 +568,104 @@ describe('workdir derivation and signal forwarding', () => {
     expect(result.isError).toBe(true)
     expect(result.error).toMatchObject({ info: { name: 'SearchError', code: 'SEARCH_FAILED' } })
     expect(text(result)).toContain('no collected output streams')
+  })
+})
+
+describe('the session root set', () => {
+  /** The main root's cwd and the extra root the fake subprocess distinguishes by spawn cwd. */
+  const MAIN = '/sessions/s1'
+  const EXTRA = '/projects/lib'
+
+  it('runs the same argv once per root and displays an extra root absolutely', async () => {
+    const { ctx, subprocess, session } = await setup({ roots: { cwd: MAIN, extraRoots: [EXTRA] } })
+    subprocess.handler = spec => spec.cwd === MAIN
+      ? runResult(`${MAIN}/src/a.ts\n`)
+      : runResult('mod/b.ts\n')
+
+    const result = await call(ctx, 'glob', { pattern: '**/*.ts' }, { agent: sessionAgent(session!) })
+
+    expect(subprocess.spawns.map(spec => spec.cwd)).toEqual([MAIN, EXTRA])
+    expect(subprocess.spawns[1]?.argv).toEqual(subprocess.spawns[0]?.argv)
+    // The main root keeps its workdir-relative display; the extra root's paths
+    // are absolute, so a relative path always denotes the main root.
+    expect(text(result)).toBe(`${join('src', 'a.ts')}\n${resolve(EXTRA, 'mod/b.ts')}`)
+  })
+
+  it('deduplicates the main root and repeated extra roots', async () => {
+    const { ctx, subprocess, session } = await setup({ roots: { cwd: MAIN, extraRoots: [MAIN, EXTRA, EXTRA] } })
+    subprocess.handler = () => runResult('a.ts\n')
+    await call(ctx, 'glob', { pattern: '*' }, { agent: sessionAgent(session!) })
+    expect(subprocess.spawns.map(spec => spec.cwd)).toEqual([MAIN, EXTRA])
+  })
+
+  it('merges both tools\' results before the inline cap, so one root never truncates another', async () => {
+    const { ctx, subprocess, spill, session } = await setup({
+      config: { globMaxResults: 2, grepMaxMatches: 2 },
+      spill: true,
+      roots: { cwd: MAIN, extraRoots: [EXTRA] },
+    })
+    subprocess.handler = spec => spec.cwd === MAIN
+      ? runResult('a.ts\nb.ts\n')
+      : runResult('c.ts\nd.ts\n')
+    const glob = await call(ctx, 'glob', { pattern: '*.ts' }, { agent: sessionAgent(session!) })
+    // The page holds the merged head; the spill artifact holds the complete
+    // merged list, extra root included.
+    expect(text(glob)).toContain('Showing 2 of 4 paths')
+    expect(spill?.saves[0]?.content).toBe(['a.ts', 'b.ts', resolve(EXTRA, 'c.ts'), resolve(EXTRA, 'd.ts')].join('\n'))
+
+    subprocess.handler = spec => spec.cwd === MAIN
+      ? runResult(`${matchLine('a.ts', 1, 'hit')}\n`)
+      : runResult(`${matchLine('c.ts', 2, 'hit')}\n${matchLine('d.ts', 3, 'hit')}\n`)
+    const grep = await call(ctx, 'grep', { pattern: 'hit' }, { agent: sessionAgent(session!) })
+    expect(text(grep)).toContain('Found 2 of 3 matches')
+    expect(spill?.saves[1]?.content).toContain(`${resolve(EXTRA, 'c.ts')}\nLine 2: hit`)
+  })
+
+  it('skips an unreadable extra root and reports it in one line instead of failing the search', async () => {
+    const { ctx, subprocess, session } = await setup({ roots: { cwd: MAIN, extraRoots: [EXTRA] } })
+    subprocess.handler = spec => spec.cwd === MAIN
+      ? runResult('kept.ts\n')
+      : runResult('', { exitCode: 2, stderr: { text: `rg: ${EXTRA}: IO error: no such file or directory` } })
+
+    const result = await call(ctx, 'glob', { pattern: '*.ts' }, { agent: sessionAgent(session!) })
+
+    expect(result.isError).toBe(false)
+    expect(text(result)).toBe(`kept.ts\n\n(1 workspace root could not be searched: ${EXTRA})`)
+    if (result.isError) throw new Error('expected glob success')
+    expect(result.value).toMatchObject({ paths: ['kept.ts'], skippedRoots: [EXTRA] })
+    // The main root's spawn is unaffected: it still ran first and its paths
+    // keep the relative display.
+    expect(subprocess.spawns[0]?.cwd).toBe(MAIN)
+  })
+
+  it('keeps a complete search single-root in form and text', async () => {
+    // The regression baseline: without extra roots the tools spawn once in the
+    // session cwd and the result carries no skip field.
+    const { ctx, subprocess } = await setup()
+    subprocess.handler = () => runResult('a.ts\n')
+    const result = await call(ctx, 'glob', { pattern: '*' }, { agent: agent(MAIN) })
+    if (result.isError) throw new Error('expected glob success')
+    expect(subprocess.spawns).toHaveLength(1)
+    expect(subprocess.spawns[0]?.cwd).toBe(MAIN)
+    expect(result.value).toEqual({ root: '.', paths: ['a.ts'] })
+    expect(text(result)).toBe('a.ts')
+  })
+
+  it('fails the call when the main root fails, even beside a healthy extra root', async () => {
+    const { ctx, subprocess, session } = await setup({ roots: { cwd: MAIN, extraRoots: [EXTRA] } })
+    subprocess.handler = spec => spec.cwd === MAIN
+      ? runResult('', { exitCode: 2, stderr: { text: `rg: ${MAIN}: IO error: no such file or directory` } })
+      : runResult('ok.ts\n')
+    const result = await call(ctx, 'glob', { pattern: '*' }, { agent: sessionAgent(session!) })
+    expect(result.isError).toBe(true)
+    expect(result.error).toMatchObject({ info: { name: 'SearchError', code: 'SEARCH_FAILED' } })
+  })
+
+  it('renders the skip note only when a root was skipped', () => {
+    expect(skippedRootsNote(undefined)).toBe('')
+    expect(skippedRootsNote([])).toBe('')
+    expect(skippedRootsNote(['/a'])).toBe('\n\n(1 workspace root could not be searched: /a)')
+    expect(skippedRootsNote(['/a', '/b'])).toBe('\n\n(2 workspace roots could not be searched: /a, /b)')
   })
 })
 

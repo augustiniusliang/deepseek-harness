@@ -3,6 +3,11 @@
  * only: selected values remain ordinary prompt text and file contents stay
  * behind the model-facing `read` tool.
  *
+ * A session's root set is its working directory (the main root) plus the extra
+ * roots the `sandboxExtraRoots` session projection folds. Relative queries and
+ * relative candidate paths stay anchored to the main root while an extra root
+ * contributes absolute paths, so one display path always names one location.
+ *
  * @module @deepseek-ai/dsh-file-reference-local/search
  */
 
@@ -61,6 +66,8 @@ interface IndexedPath extends FileReferenceCandidate {}
 interface RankedPath {
   candidate: FileReferenceCandidate
   score: number
+  /** Source root's position in the queried root order; candidates from one root keep their relative order. */
+  root: number
 }
 
 interface IndexGeneration {
@@ -254,6 +261,161 @@ export class WorkspaceFileSearch {
   }
 }
 
+/** One root of a session's root set and the display rule its candidates follow. */
+interface RootSearch {
+  /** The root's own index. */
+  search: WorkspaceFileSearch
+  /** The root's path: the base of the absolute display paths it contributes. */
+  root: string
+  /** True when this root's candidates are displayed absolute (every extra root). */
+  absolute: boolean
+}
+
+/**
+ * File-reference search over one session's complete root set: the main root
+ * (the session working directory) and the session's extra roots. Each root owns
+ * one index, and a query merges every root's candidates into one ranking.
+ *
+ * The main root keeps the single-root behavior verbatim: relative queries and
+ * relative display paths mean it. An extra root answers relative queries too —
+ * the same path holds there — but its candidates and any absolute query inside
+ * it are displayed absolute, so an extra root's path can never be mistaken for
+ * a main-root one.
+ */
+export class WorkspaceRootsFileSearch {
+  private readonly main: WorkspaceFileSearch
+  private readonly extras = new Map<string, WorkspaceFileSearch>()
+  private extraRoots: readonly string[]
+  private disposed = false
+
+  constructor(
+    private readonly mainRoot: string,
+    extraRoots: readonly string[],
+    private readonly config: FileSearchConfig,
+  ) {
+    this.main = new WorkspaceFileSearch(mainRoot, config)
+    this.extraRoots = dedupeRoots(extraRoots, mainRoot)
+  }
+
+  /**
+   * Return ranked path candidates for the current token over every root.
+   * @param rawQuery - path text following `@` or `@"`.
+   * @param signal - cancels this caller's wait without killing an index shared by a newer query.
+   * @returns at most `maxResults` deterministic candidates.
+   */
+  async list(rawQuery: string, signal: AbortSignal): Promise<FileReferenceCandidate[]> {
+    signal.throwIfAborted()
+    if (this.disposed) return []
+    const query = rawQuery.replaceAll('\\', '/')
+    const slash = query.lastIndexOf('/')
+    // A query without a separator fuzzily matches indexed basenames; every
+    // other query (including the empty one) lists one directory level.
+    const directory = slash < 0 ? '' : query.slice(0, slash + 1)
+    const fragment = slash < 0 ? query : query.slice(slash + 1)
+    const groups: FileReferenceCandidate[][] = []
+    for (const target of this.targetsFor(directory)) {
+      groups.push(await this.candidatesOf(target, query, signal))
+    }
+    return rankMergedCandidates(groups, fragment, this.config.maxResults)
+  }
+
+  /**
+   * Replace the extra roots of the set — a project change. The main root's
+   * index is untouched, an added root indexes on its first query, and a removed
+   * root is disposed and stops contributing.
+   * @param extraRoots - the session's current extra roots, in logged order.
+   */
+  setExtraRoots(extraRoots: readonly string[]): void {
+    this.extraRoots = dedupeRoots(extraRoots, this.mainRoot)
+    for (const [root, search] of this.extras) {
+      if (this.extraRoots.includes(root)) continue
+      search.dispose()
+      this.extras.delete(root)
+    }
+  }
+
+  /**
+   * Mark every root's index stale so a later query observes a fresh tree.
+   * @see WorkspaceFileSearch.invalidate
+   */
+  invalidate(): void {
+    this.main.invalidate()
+    for (const search of this.extras.values()) search.invalidate()
+  }
+
+  /** Abort traversal and make later queries return no candidates. */
+  dispose(): void {
+    if (this.disposed) return
+    this.disposed = true
+    this.main.dispose()
+    for (const search of this.extras.values()) search.dispose()
+    this.extras.clear()
+  }
+
+  /**
+   * The roots one query searches: an absolute directory addresses the one root
+   * that contains it, and everything else — a relative directory, a bare fuzzy
+   * token — searches the whole set. An extra root's index is created here, at
+   * its first query, so an untouched root costs no traversal.
+   */
+  private targetsFor(directory: string): RootSearch[] {
+    const targets: RootSearch[] = [{ search: this.main, root: this.mainRoot, absolute: false }]
+    for (const root of this.extraRoots) {
+      let search = this.extras.get(root)
+      if (search === undefined) {
+        search = new WorkspaceFileSearch(root, this.config)
+        this.extras.set(root, search)
+      }
+      targets.push({ search, root, absolute: true })
+    }
+    if (!isAbsolute(directory)) return targets
+    const owner = targets.find(target => containsRoot(target.root, directory))
+    return owner === undefined ? [] : [owner]
+  }
+
+  /**
+   * One root's candidates for a query, in display paths. An extra root that
+   * cannot be read contributes none of its own: completion is advisory, so a
+   * project folder that moved or vanished must not fail the whole query. The
+   * main root's failure and any abort stay fatal.
+   */
+  private async candidatesOf(target: RootSearch, query: string, signal: AbortSignal): Promise<FileReferenceCandidate[]> {
+    try {
+      const found = await target.search.list(query, signal)
+      return target.absolute
+        ? found.map(candidate => ({ path: absoluteDisplayPath(target.root, candidate.path), kind: candidate.kind }))
+        : found
+    } catch (error: unknown) {
+      // An abort is the caller's own cancellation, not an unreadable root.
+      if (!target.absolute || signal.aborted) throw error
+      return []
+    }
+  }
+}
+
+/** The extra roots in logged order without the main root and without duplicates. */
+function dedupeRoots(roots: readonly string[], mainRoot: string): string[] {
+  return [...new Set(roots.filter(root => root !== mainRoot))]
+}
+
+/** Whether a display path resolves inside `root`, following the same rules as {@link resolveDisplayDirectory}. */
+function containsRoot(root: string, displayPath: string): boolean {
+  const resolvedRoot = resolve(root)
+  const fromRoot = relative(resolvedRoot, resolve(resolvedRoot, displayPath))
+  return fromRoot !== '..' && !fromRoot.startsWith(`..${sep}`) && !isAbsolute(fromRoot)
+}
+
+/**
+ * The absolute display path of one candidate inside an extra root. The index
+ * builds forward-slash paths on every platform, so the absolute form joins the
+ * root in that same form; a candidate the root already reported absolute (an
+ * absolute directory query inside it) passes through.
+ */
+function absoluteDisplayPath(root: string, path: string): string {
+  if (isAbsolute(path)) return path
+  return `${root.replaceAll('\\', '/').replace(/\/+$/u, '')}/${path}`
+}
+
 async function resolveDisplayDirectory(
   root: string,
   displayDirectory: string,
@@ -309,18 +471,46 @@ function visibleForGlobalQuery(path: string, query: string): boolean {
   return !path.split('/').some(segment => segment.startsWith('.'))
 }
 
+/**
+ * Rank one root's candidates.
+ * @param candidates - the candidates, in display paths.
+ * @param query - the token they rank against ('' for a directory level).
+ * @param limit - the result cap.
+ * @returns at most `limit` candidates.
+ */
 function rankCandidates(
   candidates: readonly FileReferenceCandidate[],
   query: string,
   limit: number,
 ): FileReferenceCandidate[] {
+  return rankMergedCandidates([candidates], query, limit)
+}
+
+/**
+ * Rank candidates merged from several roots, in root order: when two candidates
+ * score alike, an earlier group's comes first, so the main root's candidates
+ * lead the list and a single-root query orders exactly as {@link rankCandidates}
+ * alone would.
+ * @param groups - one candidate list per root, in queried root order.
+ * @param query - the token they rank against ('' for a directory level).
+ * @param limit - the result cap.
+ * @returns at most `limit` candidates.
+ */
+function rankMergedCandidates(
+  groups: readonly (readonly FileReferenceCandidate[])[],
+  query: string,
+  limit: number,
+): FileReferenceCandidate[] {
   const ranked: RankedPath[] = []
-  for (const candidate of candidates) {
-    const score = scoreCandidate(candidate, query)
-    if (score !== undefined) ranked.push({ candidate, score })
-  }
+  groups.forEach((group, root) => {
+    for (const candidate of group) {
+      const score = scoreCandidate(candidate, query)
+      if (score !== undefined) ranked.push({ candidate, score, root })
+    }
+  })
   ranked.sort((left, right) =>
     right.score - left.score
+    || left.root - right.root
     || kindRank(left.candidate.kind) - kindRank(right.candidate.kind)
     || (query === '' ? 0 : left.candidate.path.length - right.candidate.path.length)
     || compareText(left.candidate.path, right.candidate.path))

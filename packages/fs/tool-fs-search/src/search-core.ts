@@ -1,9 +1,11 @@
 /**
  * Shared execution plumbing for the `glob` / `grep` search tools: the
- * package-owned `SEARCH_*` error vocabulary, one spawn helper that runs the
- * PACKAGED ripgrep binary (`@vscode/ripgrep`) with a plain argv vector and
- * returns complete raw stdout, the best-effort formatted-result spill handoff,
- * and workdir-relative path display.
+ * package-owned `SEARCH_*` error vocabulary, the root-set resolution over the
+ * calling session's working directory and its extra roots, one spawn helper per
+ * root that runs the PACKAGED ripgrep binary (`@vscode/ripgrep`) with a plain
+ * argv vector and returns complete raw stdout, the best-effort formatted-result
+ * spill handoff, and path display (workdir-relative inside the main root,
+ * absolute inside an extra root).
  *
  * Both tools execute as ordinary foreground spawns through `ctx.subprocess` —
  * never `ctx.shell`, never `ctx.shell.start()`, never a model-visible background
@@ -20,11 +22,13 @@
  */
 
 import { existsSync } from 'node:fs'
-import { isAbsolute, join, parse, relative, sep } from 'node:path'
+import { isAbsolute, join, parse, relative, resolve, sep } from 'node:path'
 import type { Context } from '@deepseek-ai/cordis'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import { ItemRetainer, TextRetainer } from '@deepseek-ai/dsh-output-retention'
 import type { RetainedItems } from '@deepseek-ai/dsh-output-retention'
+import type {} from '@deepseek-ai/dsh-sandbox-policy/types'
+import type {} from '@deepseek-ai/dsh-session-projection'
 import type { SubprocessHandle, SubprocessOutcome, SubprocessOutputRead, SubprocessSpawnSpec } from '@deepseek-ai/dsh-subprocess'
 import type { SaveTextSpill, SpillRef } from '@deepseek-ai/dsh-spill'
 import type { ToolExecution } from '@deepseek-ai/dsh-tools'
@@ -183,13 +187,80 @@ export function resolveRgPath(): Promise<string> {
   return rgPathPromise
 }
 
+/** Per-run subprocess budgets one search hands to each ripgrep spawn. */
+export interface SearchBudgets {
+  /** Cap on the complete raw stdout one run will parse. */
+  rawOutputMaxBytes: number
+  /** Terminate-escalation grace period (ms) of one run. */
+  graceMs: number
+  /** Cap on the retained stderr diagnostic tail of one run. */
+  stderrMaxBytes: number
+}
+
+/** One root's completed run. */
+export interface RootRun {
+  /** The root the command ran in (the base its relative output arrives against). */
+  root: string
+  /**
+   * True for the main root, whose paths keep the existing workdir-relative
+   * display; an extra root's paths are displayed absolute, so a relative
+   * display path always denotes the main root.
+   */
+  main: boolean
+  /** Complete raw stdout retained by the subprocess seam within the requested cap. */
+  stdout: string
+  /** True when ripgrep exited 1: a successful search with zero results. */
+  noMatches: boolean
+}
+
+/** One search's outcome over its complete root set. */
+export interface RootsRun {
+  /** One entry per root that ran: the main root first, then each extra root in root order. */
+  runs: RootRun[]
+  /** The main root, the display base of the tools' own result root. */
+  mainRoot: string
+  /** Extra roots whose run failed and was skipped, in root order; empty when every extra root ran. */
+  skippedRoots: string[]
+}
+
+/** The resolved root set of one call. */
+export interface SearchRootSet {
+  /** The main root: the calling session's cwd, else the process directory. Relative values are written against it. */
+  main: string
+  /** The session's extra roots, in logged order, deduplicated. */
+  extras: string[]
+}
+
 /**
- * Run the packaged ripgrep binary with a plain argv vector and return its
- * complete raw stdout. The working directory is the calling agent's session
- * cwd (`exec.agent.session.header.cwd`) when available, else
- * `process.cwd()`. `exec.signal` is forwarded so the cooperative tool timeout
- * (`@deepseek-ai/dsh-tool-call-timeout-policy`) and caller cancellation terminate the
- * process tree.
+ * The root set one call searches: the main root — the calling agent's session
+ * cwd (`exec.agent.session.header.cwd`), else `process.cwd()` — followed by the
+ * session's extra roots in logged order, deduplicated. A relative pattern or
+ * path is written against the main root but runs in every root.
+ *
+ * Extra roots are the `sandboxExtraRoots` session-projection state, so a
+ * composition without the projection registry or without the sandbox-policy
+ * owner that registers the key searches the main root alone.
+ *
+ * @param ctx - the plugin context; the projection registry is read with `ctx.get()`.
+ * @param exec - the tool-execution context; supplies the session whose extra roots apply.
+ * @returns the main root and the extra roots to search with it.
+ */
+export function resolveSearchRoots(ctx: Context, exec: ToolExecution): SearchRootSet {
+  const session = exec.agent?.session
+  const main = session?.header.cwd ?? process.cwd()
+  if (session === undefined) return { main, extras: [] }
+  const extras: string[] = []
+  for (const root of ctx.get('sessionProjections')?.stateOf(session, 'sandboxExtraRoots') ?? []) {
+    if (root !== main && !extras.includes(root)) extras.push(root)
+  }
+  return { main, extras }
+}
+
+/**
+ * Run the packaged ripgrep binary with a plain argv vector in one root and
+ * return its complete raw stdout. `exec.signal` is forwarded so the cooperative
+ * tool timeout (`@deepseek-ai/dsh-tool-call-timeout-policy`) and caller
+ * cancellation terminate the process tree.
  *
  * The spawn is unconfined (a plain `ctx.subprocess` call), so `--no-config`
  * is prepended: a host `RIPGREP_CONFIG_PATH` (or `rg.conf` next to the
@@ -211,28 +282,25 @@ export function resolveRgPath(): Promise<string> {
  * creation time becomes `SEARCH_ABORTED` instead.
  *
  * @param ctx - the plugin context; execution uses its `subprocess` service.
- * @param exec - the tool-execution context; supplies the session cwd and the abort signal.
+ * @param exec - the tool-execution context; supplies the abort signal.
  * @param toolName - `glob` or `grep`, used in error messages.
+ * @param workdir - the root the command runs in (its relative output arrives against it).
  * @param argv - the ripgrep arguments (every model value an unquoted argv element; no shell layer exists).
- * @param rawOutputMaxBytes - cap on the complete raw stdout the tool will parse.
- * @param graceMs - the seam's terminate-escalation grace period.
- * @param stderrMaxBytes - cap on the retained stderr diagnostic tail.
+ * @param budgets - the per-run stdout, grace, and stderr budgets.
  * @returns the complete stdout, the zero-result flag, and the resolved workdir.
  */
 export async function runRipgrep(
   ctx: Context,
   exec: ToolExecution,
   toolName: string,
+  workdir: string,
   argv: readonly string[],
-  rawOutputMaxBytes: number,
-  graceMs: number,
-  stderrMaxBytes: number,
+  budgets: SearchBudgets,
 ): Promise<RipgrepRun> {
+  const { rawOutputMaxBytes, graceMs, stderrMaxBytes } = budgets
   if (exec.signal.aborted) {
     throw new SearchError(`${toolName} was aborted before completion (tool timeout or caller cancellation)`, 'SEARCH_ABORTED')
   }
-  const cwd = exec.agent?.session.header.cwd
-  const workdir = cwd ?? process.cwd()
   let handle: SubprocessHandle
   try {
     handle = ctx.subprocess.spawn({
@@ -303,6 +371,87 @@ export function toWorkdirRelative(path: string, workdir: string): string {
   if (rel.length === 0) return '.'
   if (rel === '..' || rel.startsWith(`..${sep}`)) return path
   return rel
+}
+
+/**
+ * Run one search per root — the main root first, then each extra root — and
+ * merge the runs in that order. A relative pattern or path therefore runs once
+ * per root, so the same pattern holds in every root.
+ *
+ * An extra root that cannot be searched (missing, unreadable, or rejecting the
+ * pattern) is skipped and named in `skippedRoots`, so the remaining roots still
+ * answer. The main root's failure and any abort fail the call instead.
+ *
+ * @param ctx - the plugin context; execution uses its `subprocess` service.
+ * @param exec - the tool-execution context; supplies the session whose roots apply and the abort signal.
+ * @param toolName - `glob` or `grep`, used in error messages.
+ * @param argv - the ripgrep arguments, run as-is in every root.
+ * @param budgets - the per-run stdout, grace, and stderr budgets.
+ * @returns one run per searched root plus the extra roots that were skipped.
+ */
+export async function runRipgrepOverRoots(
+  ctx: Context,
+  exec: ToolExecution,
+  toolName: string,
+  argv: readonly string[],
+  budgets: SearchBudgets,
+): Promise<RootsRun> {
+  const { main, extras } = resolveSearchRoots(ctx, exec)
+  interface RootOutcome {
+    run?: RootRun
+    skipped?: string
+  }
+  const runRoot = async (root: string, isMain: boolean): Promise<RootOutcome> => {
+    try {
+      const run = await runRipgrep(ctx, exec, toolName, root, argv, budgets)
+      return { run: { root, main: isMain, stdout: run.stdout, noMatches: run.noMatches } }
+    } catch (error: unknown) {
+      // An extra root contributes only its own results, so losing it must not
+      // lose the roots that answered. The main root and any abort stay fatal:
+      // a partial answer from a cancelled search would read as a complete one.
+      if (isMain || exec.signal.aborted) throw error
+      return { skipped: root }
+    }
+  }
+  const outcomes = await Promise.all([
+    runRoot(main, true),
+    ...extras.map(root => runRoot(root, false)),
+  ])
+  const runs: RootRun[] = []
+  const skippedRoots: string[] = []
+  for (const outcome of outcomes) {
+    if (outcome.run !== undefined) runs.push(outcome.run)
+    if (outcome.skipped !== undefined) skippedRoots.push(outcome.skipped)
+  }
+  return { runs, mainRoot: main, skippedRoots }
+}
+
+/**
+ * Map one `rg` output path to the display form of the root it came from: inside
+ * the main root it stays workdir-relative (the single-root display), and inside
+ * an extra root it is absolute, so a relative path always denotes the main root.
+ *
+ * @param path - one path as ripgrep printed it.
+ * @param run - the run that produced it.
+ * @returns the display path.
+ */
+export function toRootDisplay(path: string, run: RootRun): string {
+  if (run.main) return toWorkdirRelative(path, run.root)
+  return isAbsolute(path) ? path : resolve(run.root, path)
+}
+
+/**
+ * The one-line note naming the extra roots a search did not cover, or '' when
+ * every root ran. The tools append it to the model-facing result so an
+ * incomplete search never reads as a complete one.
+ *
+ * @param roots - the skipped extra roots, as {@link RootsRun.skippedRoots} reports them.
+ * @returns the note, or '' when nothing was skipped.
+ */
+export function skippedRootsNote(roots: readonly string[] | undefined): string {
+  if (roots === undefined || roots.length === 0) return ''
+  const noun = roots.length === 1 ? 'workspace root' : 'workspace roots'
+  return `\n\n(${roots.length} ${noun} could not be searched: ${roots.join(', ')})`
 }
 
 /** One parsed match: the file, the 1-based line number, and the (possibly previewed) line text. */

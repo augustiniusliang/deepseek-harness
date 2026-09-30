@@ -7,6 +7,7 @@ import {
   DEFAULT_FILE_SEARCH_EXCLUDED_DIRECTORIES,
   formatFileMention,
   WorkspaceFileSearch,
+  WorkspaceRootsFileSearch,
 } from '../src/search.ts'
 
 const fsControl = vi.hoisted(() => ({
@@ -28,6 +29,7 @@ vi.mock('node:fs/promises', async (importOriginal) => {
 })
 
 const searches: WorkspaceFileSearch[] = []
+const rootsSearches: WorkspaceRootsFileSearch[] = []
 const roots: string[] = []
 /** Permission-stripped directories; restored before cleanup can remove them. */
 const locks: string[] = []
@@ -64,9 +66,29 @@ function search(root: string, overrides: Partial<ConstructorParameters<typeof Wo
   return instance
 }
 
+function rootsSearch(
+  mainRoot: string,
+  extraRoots: string[],
+  overrides: Partial<ConstructorParameters<typeof WorkspaceFileSearch>[1]> = {},
+): WorkspaceRootsFileSearch {
+  const instance = new WorkspaceRootsFileSearch(mainRoot, extraRoots, {
+    maxResults: overrides.maxResults ?? 20,
+    maxEntries: overrides.maxEntries ?? 10_000,
+    excludedDirectories: overrides.excludedDirectories ?? ['.git', 'node_modules'],
+  })
+  rootsSearches.push(instance)
+  return instance
+}
+
+/** An extra root's candidate display form: the root joined to the index path, forward-slash separated. */
+function inRoot(root: string, path: string): string {
+  return `${root.replaceAll('\\', '/').replace(/\/+$/u, '')}/${path}`
+}
+
 afterEach(async () => {
   for (const locked of locks.splice(0)) await chmod(locked, 0o700).catch(() => undefined)
   for (const instance of searches.splice(0)) instance.dispose()
+  for (const instance of rootsSearches.splice(0)) instance.dispose()
   await Promise.all(roots.splice(0).map(root => rm(root, { recursive: true, force: true })))
   vi.mocked(readdir).mockClear()
 })
@@ -322,5 +344,144 @@ describe('WorkspaceFileSearch', () => {
     const nonErrorPending = files.list('tui', nonErrorAbort.signal)
     nonErrorAbort.abort('cancelled')
     await expect(nonErrorPending).rejects.toThrow('file search aborted')
+  })
+})
+
+describe('WorkspaceRootsFileSearch', () => {
+  it('merges the main root and an extra root, displaying extra candidates absolutely', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    const files = rootsSearch(main, [extra])
+    const signal = new AbortController().signal
+
+    // A bare token fuzzily matches every root's index.
+    expect(await files.list('tui', signal)).toEqual([
+      { path: 'src/tui.spec.ts', kind: 'file' },
+      { path: inRoot(extra, 'src/tui.spec.ts'), kind: 'file' },
+    ])
+    // A relative directory query holds in every root; the main root answers
+    // first and keeps the relative display.
+    expect(await files.list('src/', signal)).toEqual([
+      { path: 'src/terminal-view.ts', kind: 'file' },
+      { path: 'src/tui.spec.ts', kind: 'file' },
+      { path: inRoot(extra, 'src/terminal-view.ts'), kind: 'file' },
+      { path: inRoot(extra, 'src/tui.spec.ts'), kind: 'file' },
+    ])
+    // The empty query lists each root's top level, main root first, with the
+    // same hidden/excluded filtering in both.
+    expect(await files.list('', signal)).toEqual([
+      { path: 'docs', kind: 'directory' },
+      { path: 'src', kind: 'directory' },
+      { path: 'README.md', kind: 'file' },
+      { path: inRoot(extra, 'docs'), kind: 'directory' },
+      { path: inRoot(extra, 'src'), kind: 'directory' },
+      { path: inRoot(extra, 'README.md'), kind: 'file' },
+    ])
+  })
+
+  it('addresses an absolute query to the root that contains it', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    const files = rootsSearch(main, [extra])
+    const signal = new AbortController().signal
+
+    const extraSrc = `${inRoot(extra, 'src')}/`
+    expect(await files.list(`${extraSrc}tui`, signal)).toEqual([
+      { path: `${extraSrc}tui.spec.ts`, kind: 'file' },
+      { path: `${extraSrc}terminal-view.ts`, kind: 'file' },
+    ])
+    // Nothing contains a path outside every root.
+    expect(await files.list('/nowhere/at/all/', signal)).toEqual([])
+  })
+
+  it('traverses an extra root only for a query that needs its index', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    const files = rootsSearch(main, [extra])
+    const signal = new AbortController().signal
+
+    expect(await files.list('src/', signal)).toEqual([
+      { path: 'src/terminal-view.ts', kind: 'file' },
+      { path: 'src/tui.spec.ts', kind: 'file' },
+      { path: inRoot(extra, 'src/terminal-view.ts'), kind: 'file' },
+      { path: inRoot(extra, 'src/tui.spec.ts'), kind: 'file' },
+    ])
+    // One directory read per extra root for the level query — no recursive
+    // traversal behind the caret.
+    expect(vi.mocked(readdir).mock.calls.filter(([path]) => String(path).startsWith(extra))).toHaveLength(1)
+  })
+
+  it('skips an extra root whose index cannot be read and still answers from the rest', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    fsControl.denyReaddir = extra
+    try {
+      const files = rootsSearch(main, [extra])
+      expect(await files.list('README', new AbortController().signal)).toEqual([{ path: 'README.md', kind: 'file' }])
+    } finally {
+      fsControl.denyReaddir = undefined
+    }
+  })
+
+  it('skips an extra root that is gone, for both a fuzzy and a directory query', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    await rm(extra, { recursive: true, force: true })
+    const files = rootsSearch(main, [extra])
+    const signal = new AbortController().signal
+    expect(await files.list('README', signal)).toEqual([{ path: 'README.md', kind: 'file' }])
+    expect(await files.list('src/', signal)).toEqual([
+      { path: 'src/terminal-view.ts', kind: 'file' },
+      { path: 'src/tui.spec.ts', kind: 'file' },
+    ])
+  })
+
+  it('fails the query when the main root cannot be read', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    fsControl.denyReaddir = main
+    try {
+      const files = rootsSearch(main, [extra])
+      await expect(files.list('README', new AbortController().signal)).rejects.toThrow('EACCES')
+    } finally {
+      fsControl.denyReaddir = undefined
+    }
+  })
+
+  it('adds and drops extra roots without disturbing the main root index', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    const files = rootsSearch(main, [])
+    const signal = new AbortController().signal
+    expect(await files.list('tui', signal)).toEqual([{ path: 'src/tui.spec.ts', kind: 'file' }])
+
+    // The main root repeated as an extra root contributes exactly once.
+    files.setExtraRoots([extra, main, extra])
+    expect(await files.list('tui', signal)).toEqual([
+      { path: 'src/tui.spec.ts', kind: 'file' },
+      { path: inRoot(extra, 'src/tui.spec.ts'), kind: 'file' },
+    ])
+    files.setExtraRoots([])
+    expect(await files.list('tui', signal)).toEqual([{ path: 'src/tui.spec.ts', kind: 'file' }])
+  })
+
+  it('invalidates every root index and disposes them together', async () => {
+    const main = await workspace()
+    const extra = await workspace()
+    const files = rootsSearch(main, [extra])
+    const signal = new AbortController().signal
+    expect(await files.list('fresh-extra', signal)).toEqual([])
+
+    await writeFile(join(extra, 'src', 'fresh-extra.ts'), 'fresh')
+    files.invalidate()
+    await vi.waitFor(async () => {
+      expect(await files.list('fresh-extra', signal)).toEqual([
+        { path: inRoot(extra, 'src/fresh-extra.ts'), kind: 'file' },
+      ])
+    })
+
+    files.dispose()
+    expect(await files.list('fresh-extra', signal)).toEqual([])
+    expect(await files.list('', signal)).toEqual([])
   })
 })

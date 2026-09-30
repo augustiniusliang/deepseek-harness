@@ -9,8 +9,8 @@
   en: 6fd594ab2eacb521
   zh: bcbce1550c71bbae
 /deepseek-ai-dsh-tool-fs-search/summary:
-  en: a2d8407299a71efe
-  zh: d43338a4c7954a39
+  en: 782769dafc63fc8c
+  zh: e59a7f3085b407ab
 /deepseek-ai-dsh-tool-fs-search/table-of-contents:
   en: d152484eb41ac6b4
   zh: 09388d293f9be9cb
@@ -23,12 +23,15 @@
 /deepseek-ai-dsh-tool-fs-search/use-this-package/the-tools:
   en: 9edb7655f8ed8bc6
   zh: 21eadd65c1f2f07c
+/deepseek-ai-dsh-tool-fs-search/use-this-package/search-roots:
+  en: 0fd9a09af66c5fba
+  zh: 844a84a468f4a7c0
 /deepseek-ai-dsh-tool-fs-search/use-this-package/configuration:
   en: 3e84e19a22aeb6c8
   zh: 8ac44b21eb697f2f
 /deepseek-ai-dsh-tool-fs-search/use-this-package/deployment-requirement:
-  en: 4aa9b74deef586bc
-  zh: f855f815829d4e1e
+  en: 117ea26457fec556
+  zh: c7a041cceacfbefd
 /deepseek-ai-dsh-tool-fs-search/use-this-package/failures-and-recovery:
   en: d7a59e296308b2bd
   zh: 66243fcd932fe49a
@@ -40,10 +43,10 @@
   zh: 9c9e8b9a9713dda5
 /deepseek-ai-dsh-tool-fs-search/understand-the-implementation/source-map:
   en: 5a30f023dd86c345
-  zh: 558b6e80c62648ba
+  zh: e7345cfb907f079e
 /deepseek-ai-dsh-tool-fs-search/understand-the-implementation/how-a-search-runs:
-  en: 8443370c1f347d0c
-  zh: 5f5c6fa8cdb97cba
+  en: afea3503d59bdaca
+  zh: ae011af7becae10a
 /deepseek-ai-dsh-tool-fs-search/understand-the-implementation/two-budgets-two-artifacts:
   en: b7e8c2191f8227dc
   zh: a064e2e03761bfd5
@@ -87,8 +90,8 @@
   en: e9d1330ebd642a0d
   zh: f9bc6dffb0afd878
 /deepseek-ai-dsh-tool-fs-search/model-experience/results-and-spill-notices/what-the-model-sees:
-  en: 3a357b506d327e18
-  zh: b2d97abd9af096d4
+  en: 30f0b476e81b4a7c
+  zh: 7987d36e1975d550
 /deepseek-ai-dsh-tool-fs-search/model-experience/results-and-spill-notices/token-effect:
   en: 033a5b99fec018a1
   zh: 79fc41e856cd9925
@@ -108,8 +111,8 @@
   en: f5d5f97a153f7c70
   zh: 14660e568cd51bdc
 /deepseek-ai-dsh-tool-fs-search/known-limitations-and-deferred-work:
-  en: 4fca846226cb8ef2
-  zh: fb797ec586cec7f4
+  en: 20a97ffcdef7336f
+  zh: 1b0dd404b77c61d1
 /deepseek-ai-dsh-tool-fs-search/known-limitations-and-deferred-work/dev-note:
   en: 0c4d0c465413d319
   zh: 2e062f9e20a99241

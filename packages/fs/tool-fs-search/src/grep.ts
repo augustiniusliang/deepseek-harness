@@ -17,7 +17,7 @@ import type { GenericCallView, SearchResultView, ToolResult } from '@deepseek-ai
 import type { RetainedItems } from '@deepseek-ai/dsh-output-retention'
 import type { SpillRef } from '@deepseek-ai/dsh-spill'
 import type { GrepMatch } from './search-core.ts'
-import { SearchError, previewLine, retainGrepMatches, runRipgrep, toWorkdirRelative, trySaveFormattedResult } from './search-core.ts'
+import { SearchError, previewLine, retainGrepMatches, runRipgrepOverRoots, skippedRootsNote, toRootDisplay, trySaveFormattedResult } from './search-core.ts'
 import { grepSearchMeta, searchViewFromMeta } from './presentation.ts'
 import { acceptedDirectCallValue } from './direct-call.ts'
 
@@ -57,6 +57,13 @@ export interface GrepInput {
   pattern: string
   path?: string
   include?: string
+}
+
+/** The canonical `grep` value the spill post-processing reads. */
+interface GrepResult {
+  matches: GrepMatch[]
+  /** A root of the session's root set this call could not search; absent when every root ran. */
+  skippedRoots?: string[]
 }
 
 /**
@@ -309,30 +316,38 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
               },
             },
           },
+          // Present only when a root of the session's root set could not be
+          // searched, so a complete search keeps the single-root value form.
+          skippedRoots: { type: 'array', items: { type: 'string' } },
         },
       },
       render: (_args, value) => [{
         type: 'text',
-        text: formatRetainedGrep(retainGrepMatches(value.matches, caps.maxMatches, caps.maxLineBytes)),
+        text: formatRetainedGrep(retainGrepMatches(value.matches, caps.maxMatches, caps.maxLineBytes))
+          + skippedRootsNote(value.skippedRoots),
       }],
       presentationMeta: (_args, value) =>
         grepSearchMeta(retainGrepMatches(value.matches, caps.maxMatches, caps.maxLineBytes), caps.maxMetaBytes),
     },
     async execute(args, exec) {
       const input = parseGrepArgs(args)
-      const run = await runRipgrep(ctx, exec, 'grep', buildGrepCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
-      if (run.noMatches) return { matches: [] }
-
+      const roots = await runRipgrepOverRoots(ctx, exec, 'grep', buildGrepCommand(input), caps)
       const all: GrepMatch[] = []
-      for (const raw of parseGrepMatches(run.stdout)) {
-        const match: GrepMatch = {
-          path: toWorkdirRelative(raw.path, run.workdir),
-          lineNumber: raw.lineNumber,
-          line: raw.line,
+      for (const run of roots.runs) {
+        if (run.noMatches) continue
+        for (const raw of parseGrepMatches(run.stdout)) {
+          const match: GrepMatch = {
+            path: toRootDisplay(raw.path, run),
+            lineNumber: raw.lineNumber,
+            line: raw.line,
+          }
+          all.push(match)
         }
-        all.push(match)
       }
-      return { matches: all }
+      return {
+        matches: all,
+        ...roots.skippedRoots.length > 0 ? { skippedRoots: roots.skippedRoots } : {},
+      }
     },
     presentCall: presentGrepCall,
     presentResult: presentGrepResult,
@@ -341,7 +356,7 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
 
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
-    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as { matches: GrepMatch[] } | undefined
+    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as GrepResult | undefined
     if (value === undefined) return decision
     const matches = value.matches
     if (matches.length <= caps.maxMatches) return decision
@@ -358,7 +373,8 @@ export function applyGrepTool(ctx: Context, caps: GrepToolCaps): void {
       kind: 'accept',
       content: [{
         type: 'text',
-        text: formatRetainedGrep(retainGrepMatches(matches, caps.maxMatches, caps.maxLineBytes), spillRef),
+        text: formatRetainedGrep(retainGrepMatches(matches, caps.maxMatches, caps.maxLineBytes), spillRef)
+          + skippedRootsNote(value.skippedRoots),
       }],
       ...decision.additionalContexts !== undefined ? { additionalContexts: decision.additionalContexts } : {},
     }

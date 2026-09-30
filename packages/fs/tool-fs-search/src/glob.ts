@@ -14,7 +14,7 @@ import { sep } from 'node:path'
 import { defineTool } from '@deepseek-ai/dsh-tools'
 import type { GenericCallView, SearchResultView, ToolResult } from '@deepseek-ai/dsh-tools'
 import type { SpillRef } from '@deepseek-ai/dsh-spill'
-import { runRipgrep, toWorkdirRelative, trySaveFormattedResult } from './search-core.ts'
+import { runRipgrepOverRoots, skippedRootsNote, toRootDisplay, toWorkdirRelative, trySaveFormattedResult } from './search-core.ts'
 import { globSearchMeta, searchViewFromMeta } from './presentation.ts'
 import { acceptedDirectCallValue } from './direct-call.ts'
 
@@ -58,6 +58,14 @@ export interface GlobToolCaps {
 export interface GlobInput {
   pattern: string
   path?: string
+}
+
+/** The canonical `glob` value the spill post-processing reads. */
+interface GlobResult {
+  root: string
+  paths: string[]
+  /** A root of the session's root set this call could not search; absent when every root ran. */
+  skippedRoots?: string[]
 }
 
 /**
@@ -325,9 +333,12 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
         properties: {
           root: { type: 'string', required: true },
           paths: { type: 'array', required: true, items: { type: 'string' } },
+          // Present only when a root of the session's root set could not be
+          // searched, so a complete search keeps the single-root value form.
+          skippedRoots: { type: 'array', items: { type: 'string' } },
         },
       },
-      render: (_args, value) => [{ type: 'text', text: renderGlobPaths(value.paths, caps, value.root) }],
+      render: (_args, value) => [{ type: 'text', text: renderGlobPaths(value.paths, caps, value.root) + skippedRootsNote(value.skippedRoots) }],
       presentationMeta: (_args, value) => {
         const page = globCardPage(value.paths, caps, value.root)
         return globSearchMeta({ items: page.items, truncated: page.truncated, seen: value.paths.length }, caps.maxMetaBytes)
@@ -335,17 +346,21 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
     },
     async execute(args, exec) {
       const input = parseGlobArgs(args)
-      const run = await runRipgrep(ctx, exec, 'glob', buildGlobCommand(input), caps.rawOutputMaxBytes, caps.graceMs, caps.stderrMaxBytes)
-      const root = input.path === undefined ? '.' : toWorkdirRelative(input.path, run.workdir)
-      if (run.noMatches) return { root, paths: [] }
-
+      const roots = await runRipgrepOverRoots(ctx, exec, 'glob', buildGlobCommand(input), caps)
+      const root = input.path === undefined ? '.' : toWorkdirRelative(input.path, roots.mainRoot)
       const all: string[] = []
-      for (const line of run.stdout.split('\n')) {
-        if (line.length === 0) continue
-        const displayPath = toWorkdirRelative(line, run.workdir)
-        all.push(displayPath)
+      for (const run of roots.runs) {
+        if (run.noMatches) continue
+        for (const line of run.stdout.split('\n')) {
+          if (line.length === 0) continue
+          all.push(toRootDisplay(line, run))
+        }
       }
-      return { root, paths: all }
+      return {
+        root,
+        paths: all,
+        ...roots.skippedRoots.length > 0 ? { skippedRoots: roots.skippedRoots } : {},
+      }
     },
     presentCall: presentGlobCall,
     presentResult: presentGlobResult,
@@ -354,14 +369,14 @@ export function applyGlobTool(ctx: Context, caps: GlobToolCaps): void {
 
   ctx.on('tools/post-execute', async (exec, result, next) => {
     const decision = await next()
-    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as { root: string; paths: string[] } | undefined
+    const value = acceptedDirectCallValue(ctx, tool, exec, result, decision) as GlobResult | undefined
     if (value === undefined) return decision
     const paths = value.paths
     if (paths.length <= caps.maxResults) return decision
     const spillRef = await trySaveFormattedResult(ctx, exec, 'glob-results.txt', paths.join('\n'))
     return {
       kind: 'accept',
-      content: [{ type: 'text', text: renderGlobPaths(paths, caps, value.root, spillRef) }],
+      content: [{ type: 'text', text: renderGlobPaths(paths, caps, value.root, spillRef) + skippedRootsNote(value.skippedRoots) }],
       ...decision.additionalContexts !== undefined ? { additionalContexts: decision.additionalContexts } : {},
     }
   })

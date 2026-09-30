@@ -21,7 +21,11 @@
  * Returned paths are displayed relative to the resolved workdir and are
  * follow-up-readable only in co-located deployments where the workdir and the
  * filesystem `read` root are the same workspace — a documented v1 deployment
- * requirement, not runtime-validated.
+ * requirement, not runtime-validated. A session with extra roots (the
+ * `sandboxExtraRoots` projection the sandbox policy owner folds) searches every
+ * root: the main root's paths keep that relative display, an extra root's paths
+ * are absolute, and a root that cannot be searched is skipped and named in the
+ * result instead of failing the search.
  *
  * @module @deepseek-ai/dsh-tool-fs-search
  */
@@ -57,11 +61,15 @@ export {
   SearchError,
   previewLine,
   resolveRgPath,
+  resolveSearchRoots,
   runRipgrep,
+  runRipgrepOverRoots,
+  skippedRootsNote,
+  toRootDisplay,
   toWorkdirRelative,
   trySaveFormattedResult,
 } from './search-core.ts'
-export type { GrepMatch, RipgrepRun, SearchErrorCode } from './search-core.ts'
+export type { GrepMatch, RipgrepRun, RootRun, RootsRun, SearchBudgets, SearchErrorCode, SearchRootSet } from './search-core.ts'
 
 /** Cordis plugin name used by loader diagnostics. */
 export const name = 'tool-fs-search'

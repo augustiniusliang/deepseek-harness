@@ -16,6 +16,9 @@ import { tmpdir } from 'node:os'
 import { join } from 'node:path'
 import { Context } from '@deepseek-ai/cordis'
 import { ToolCallId } from '@deepseek-ai/dsh-llm'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import SessionStore, { SessionId } from '@deepseek-ai/dsh-session'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
 import ToolRuntime, { TOOL_ABORTED_BEFORE_DISPATCH } from '@deepseek-ai/dsh-tools'
 import LocalSubprocessRuntime from '@deepseek-ai/dsh-subprocess-local'
@@ -172,6 +175,47 @@ describe('search tools over the real subprocess service + the packaged rg', () =
       } finally {
         await rm(sessionDir, { recursive: true, force: true })
       }
+    })
+  })
+
+  describe('per-session root set', () => {
+    beforeEach(async () => {
+      await ctx.plugin(SessionStore)
+      await ctx.plugin(SessionProjectionRegistry)
+      // The policy owner registers the `sandboxExtraRoots` fold itself.
+      await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write', workspaceRoot: dir })
+    })
+
+    it('discovers and greps an extra root, whose paths come back absolute', async () => {
+      const extra = await mkdtemp(join(tmpdir(), 'dsh-search-extra-'))
+      try {
+        await mkdir(join(extra, 'lib'), { recursive: true })
+        await writeFile(join(extra, 'lib', 'extra.ts'), 'export const extraOnly = true\n')
+        const session = ctx.sessions.create(SessionId('session-roots'), { meta: { cwd: dir } })
+        session.append('sandbox/extra-roots', { roots: [extra] })
+        const agentObj = { session }
+
+        expect(text(await call('glob', { pattern: 'extra.ts' }, agentObj))).toBe(join(extra, 'lib', 'extra.ts'))
+        expect(text(await call('grep', { pattern: 'extraOnly' }, agentObj)))
+          .toBe(`Found 1 match\n\n${join(extra, 'lib', 'extra.ts')}\nLine 1: export const extraOnly = true`)
+        // The same composition's sessions without extra roots keep the
+        // workdir-relative display.
+        const single = ctx.sessions.create(SessionId('session-main-only'), { meta: { cwd: dir } })
+        expect(text(await call('glob', { pattern: '**/*.ts' }, { session: single }))).toContain(join('src', 'alpha.ts'))
+      } finally {
+        await rm(extra, { recursive: true, force: true })
+      }
+    })
+
+    it('skips an extra root that is gone and names it, keeping the main results', async () => {
+      const missing = await mkdtemp(join(tmpdir(), 'dsh-search-gone-'))
+      await rm(missing, { recursive: true, force: true })
+      const session = ctx.sessions.create(SessionId('session-gone-root'), { meta: { cwd: dir } })
+      session.append('sandbox/extra-roots', { roots: [missing] })
+      const result = await call('glob', { pattern: '*.ts' }, { session })
+      expect(result.isError).toBe(false)
+      expect(text(result)).toContain('alpha.ts')
+      expect(text(result)).toContain(`(1 workspace root could not be searched: ${missing})`)
     })
   })
 
