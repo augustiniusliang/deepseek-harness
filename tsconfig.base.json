@@ -137,6 +137,8 @@
       "@deepseek-ai/dsh-plan-mode/client": ["./packages/plan/plan-mode/src/client.ts"],
       "@deepseek-ai/dsh-sandbox-policy/types": ["./packages/sandbox/sandbox-policy/src/types.ts"],
       "@deepseek-ai/dsh-sandbox-policy/client": ["./packages/sandbox/sandbox-policy/src/client.ts"],
+      "@deepseek-ai/dsh-world/types": ["./packages/world/world/src/types.ts"],
+      "@deepseek-ai/dsh-world/client": ["./packages/world/world/src/client.ts"],
       "@deepseek-ai/dsh-agent-preset-registry/tools": ["./packages/preset/agent-preset-registry/src/tools.ts"],
       "@deepseek-ai/dsh-agent-preset-registry/types": ["./packages/preset/agent-preset-registry/src/types.ts"],
       "@deepseek-ai/dsh-agent-preset-registry/display": ["./packages/preset/agent-preset-registry/src/display.ts"],
@@ -554,7 +556,9 @@
       "@deepseek-ai/dsh-workflow-ptc": ["./packages/workflow/workflow-ptc/src"],
       "@deepseek-ai/dsh-workspace": ["./packages/workspace/workspace/src"],
       "@deepseek-ai/dsh-workspace/invariant": ["./packages/workspace/workspace/src/invariant.ts"],
-      "@deepseek-ai/dsh-workspace-changes": ["./packages/deliverables/workspace-changes/src"]
+      "@deepseek-ai/dsh-workspace-changes": ["./packages/deliverables/workspace-changes/src"],
+      "@deepseek-ai/dsh-world": ["./packages/world/world/src"],
+      "@deepseek-ai/dsh-world/invariant": ["./packages/world/world/src/invariant.ts"]
       // END generated package aliases
     }
   }

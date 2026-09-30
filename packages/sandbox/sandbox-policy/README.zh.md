@@ -77,6 +77,8 @@ kind: "package-reference"
 
 `resolve({ session, mode })` 返回一份完整的逐调用策略：已批准的显式模式优先于会话最后一条 `sandbox/mode` 事件，后者又优先于部署默认值。会话的不可变 `cwd` 提供工作区根目录；否则使用配置的回退值。会话最后一条 `sandbox/extra-roots` 事件提供其额外可写根目录；没有该事件或记录的是空列表时，该字段缺席——正是单根策略。执行环境中的绝对路径写法保持不变。执行限制的提供方在自己的文件系统上规范化各根目录，因此远端 `symlink/..` 路径绝不会在 Harness 主机上解析。
 
+工作区根目录必须满足宿主机的绝对路径语法——但有一个已注册的例外：执行世界（来自 `@deepseek-ai/dsh-world` 的 `ctx.worlds` 注册表）通过 `registerPathClaim` 认领自己拥有的路径，被认领的根目录跳过宿主机绝对性校验，因为认领后端自己的文件系统按其路径语法执行绝对性与围栏。认领只是本服务持有的一个窄谓词，策略归属方从不 import 世界一侧；依赖只指向一个方向，注销世界注册即恢复宿主机校验。
+
 ### 逐会话存储
 
 运行时切换是在对应会话日志中追加的一条仅写入日志的 `sandbox/mode` 事件——切换本身就是事件，任何机制都不会在带外修改模式状态。`effective = explicit grant ?? fold(events) ?? deployment default`，因此覆盖通过回放跨重启保留，两个会话也绝不会看到彼此状态。工作区标识无需事件：创建时记录的不可变 `SessionHeader.cwd` 是该会话每次调用使用的根，而额外可写根目录是第二组仅写入日志的机制——每次变更一条 `sandbox/extra-roots` 事件，由它自己的投影单元折叠为 `sandboxExtraRoots`——绝不是部署配置。这些事件仍只进入日志；在每次请求前，归属方会把当前事实贡献给完整运行时上下文快照，agent loop（智能体循环）将该快照记录为一条带来源的 `user/message`。
@@ -117,7 +119,7 @@ kind: "package-reference"
 
 #### 模型看到什么
 
-每个 agent 会话的当前运行时上下文快照中都有一项 `sandbox:policy` 贡献。它不枚举已挂载的能力。工具插件继续负责操作与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。
+每个 agent 会话的当前运行时上下文快照中都有一项 `sandbox:policy` 贡献。它不枚举已挂载的能力。工具插件继续负责操作与升权引导，批准策略单独贡献给同一份快照，计划引导仍由 `dsh-plan-mode` 的系统段落管理。`Additional writable roots: […]` 子句仅当会话记录过非空的 `sandbox/extra-roots` 列表时出现；没有它时，`workspace-write` 文本与所示形式逐字节相同，只少了该子句。
 
 ##### 只读
 
@@ -130,8 +132,6 @@ Current DSH file policy: read-only. Any available operation enforced by the DSH 
 ```markdown
 Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Additional writable roots: ["<extra root>"]. Some platform temporary areas may also be writable.
 ```
-
-`Additional writable roots: […]` 子句仅当会话记录过非空的 `sandbox/extra-roots` 列表时出现；没有它时，文本与上面的单根形式逐字节相同，只少了该子句。
 
 ##### 完全访问
 

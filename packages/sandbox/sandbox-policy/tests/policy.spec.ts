@@ -10,7 +10,8 @@ import { join, resolve, sep } from 'node:path'
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
 import type { Agent } from '@deepseek-ai/dsh-agent'
-import { SESSION_FORMAT_VERSION, Session, SessionId } from '@deepseek-ai/dsh-session'
+import { SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import type { SessionEvent } from '@deepseek-ai/dsh-session'
 import SandboxPolicyService, { SANDBOX_MODES, setExtraWritableRoots, setSandboxMode } from '@deepseek-ai/dsh-sandbox-policy'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SystemPrompt, { renderContextSnapshot, renderPrompt } from '@deepseek-ai/dsh-system-prompt'
@@ -334,5 +335,55 @@ describe('the sandbox/extra-roots session kit', () => {
 
     setExtraWritableRoots(active, [])
     expect(await policyContext(ctx, active)).toBe(single)
+  })
+})
+
+describe('world path claims', () => {
+  /**
+   * A minimal Session whose cwd fails the host's own absolute-path grammar — a
+   * real `Session.create` rejects such a cwd, which is exactly the
+   * host-grammar coupling a world path claim exists to bypass. `resolve()`
+   * reads only identity, header, seq, and the log.
+   */
+  function stubSession(id: string, cwd: string): Session {
+    return Object.assign({} as Session, {
+      id: SessionId(id),
+      seq: SessionLogOffset(0),
+      inheritedEventCount: SessionLogOffset(0),
+      header: {
+        version: SESSION_FORMAT_VERSION,
+        id: SessionId(id),
+        createdAt: 0,
+        isSeeded: false,
+        cwd,
+      },
+      snapshotEvents: (): SessionEvent[] => [],
+    })
+  }
+
+  it('lets a registered world path claim bypass host absolute validation until disposed', async () => {
+    const ctx = await mounted({ mode: 'workspace-write', workspaceRoot: '/fallback' })
+    // `remote-home/...` is non-absolute on every host, so the claim is the only
+    // thing admitting it.
+    const remote = stubSession('sess-world-claimed', 'remote-home/u/project')
+    expect(() => ctx.sandboxPolicy.resolve({ session: remote })).toThrow(
+      'sandbox-policy: workspace root must be an absolute execution-world path',
+    )
+
+    const dispose = ctx.sandboxPolicy.registerPathClaim(path => path.startsWith('remote-home/'))
+    expect(ctx.sandboxPolicy.resolve({ session: remote })).toEqual({
+      mode: 'workspace-write',
+      workspaceRoot: 'remote-home/u/project',
+      sessionId: 'sess-world-claimed',
+    })
+    // An unclaimed non-absolute root is still rejected while a claim exists.
+    expect(() => ctx.sandboxPolicy.resolve({ session: stubSession('sess-world-unclaimed', 'elsewhere/u') })).toThrow(
+      'sandbox-policy: workspace root must be an absolute execution-world path',
+    )
+
+    dispose()
+    expect(() => ctx.sandboxPolicy.resolve({ session: remote })).toThrow(
+      'sandbox-policy: workspace root must be an absolute execution-world path',
+    )
   })
 })

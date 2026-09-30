@@ -36,8 +36,8 @@
   en: 2d560aa6681fcfb8
   zh: e1c6361a6fa40c63
 /deepseek-ai-dsh-sandbox-policy/understand-the-implementation/resolution-precedence:
-  en: eac46da57d02879f
-  zh: f93ea36bdb8926a5
+  en: 5abb69752084b615
+  zh: abff3fc09c656fb5
 /deepseek-ai-dsh-sandbox-policy/understand-the-implementation/the-per-session-store:
   en: 1f643bc2b075d7f2
   zh: e846193b34d3e088
@@ -57,14 +57,14 @@
   en: 593b59dbbb02bc8c
   zh: 38fa746346e9bc06
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees:
-  en: 4cd0e0cf93a02d2c
-  zh: 0f8ece0297cf3c0b
+  en: 47eae68a7dabbd00
+  zh: 7845925435703caa
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/read-only:
   en: 36f15579c9444eb9
   zh: 289f3c4ce040bfe9
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/workspace-write:
-  en: b6b4d0504a897e91
-  zh: ede7032d2dfd5153
+  en: 269d494ad304638d
+  zh: a879c1d7cc03e6ac
 /deepseek-ai-dsh-sandbox-policy/model-experience/current-file-sandbox-policy/what-the-model-sees/danger-full-access:
   en: 4e28324a011422a1
   zh: bf31ffce30f06a09

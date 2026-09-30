@@ -679,6 +679,14 @@ const SERVICE_ROLES: ServiceRole[] = [
     note: 'The one home for the deployment default mode + workspace root; only the sandboxed executor and provider read the service (the tool layers use the pure `sandbox/mode` fold it also exports). Both enforcing families read it so bash and fs cannot confine to different roots.',
   },
   {
+    key: 'worlds',
+    pkg: 'world',
+    title: 'Execution-world routing registry',
+    mode: 'seam',
+    consumers: [],
+    note: 'World providers register plain backend objects (fs + subprocess + path/cwd routing facts); the built-in local backend wraps the mounted fs/subprocess pair as the fallback. sandbox-policy consumes world path ownership through a registered claim predicate, not this service, keeping the dependency one-directional.',
+  },
+  {
     key: 'approval',
     pkg: 'user-approval',
     title: 'Approval seam',

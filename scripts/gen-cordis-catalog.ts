@@ -104,6 +104,7 @@ export const SERVICE_PAGE: Record<string, string> = {
   sandbox: 'sandbox.md',
   sandboxPolicy: 'sandbox.md',
   ssh: 'ssh.md',
+  worlds: 'world.md',
   sessionPersistence: 'persistence.md',
   sessionQuery: 'session-query.md',
   sessionFileReferences: 'session-reference.md',
@@ -942,6 +943,8 @@ export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
   TerminalFrame: 'Browser terminal stream frames are owned by packages/api/terminal-controller/README.md',
   TerminalRetentionFrame: 'Browser terminal window holds are owned by packages/api/terminal-controller/README.md',
   WebTerminalId: 'Browser terminal identity is owned by packages/api/terminal-controller/README.md',
+  WorldRef: 'execution-world reference grammar is owned by packages/world/world/README.md',
+  WorldBackend: 'execution-world backend contract is owned by packages/world/world/README.md',
 }
 
 /** Repository data policy consumed by the Cordis catalog projector. */

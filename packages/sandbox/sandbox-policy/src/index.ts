@@ -36,9 +36,16 @@ export { SANDBOX_MODES, setSandboxMode } from './session-mode.ts'
 export { setExtraWritableRoots } from './session-extra-roots.ts'
 export type * from './types.ts'
 
-/** Preserve execution-world spelling; enforcing providers resolve filesystem identity on their host. */
-function resolveWorkspaceRoot(path: string): string {
-  if (!isAbsolute(path)) throw new Error('sandbox-policy: workspace root must be an absolute execution-world path')
+/**
+ * Preserve execution-world spelling; enforcing providers resolve filesystem
+ * identity on their host. A path claimed by a registered world backend
+ * (see {@link SandboxPolicyService.registerPathClaim}) skips host absolute
+ * validation: the host's `isAbsolute` rejects that world's spelling (a POSIX
+ * WSL path on a Windows host), and the owning backend's filesystem enforces
+ * its own absoluteness and fencing.
+ */
+function resolveWorkspaceRoot(path: string, claimedByWorld = false): string {
+  if (!isAbsolute(path) && !claimedByWorld) throw new Error('sandbox-policy: workspace root must be an absolute execution-world path')
   return path
 }
 
@@ -133,6 +140,8 @@ export class SandboxPolicyService extends Service {
   readonly defaultMode: SandboxMode
   /** The absolute `workspace-write` fallback root for calls without a session cwd. */
   readonly workspaceRoot: string
+  /** World-owned path claims; a claimed path skips host absolute validation at resolve time. */
+  private readonly pathClaims = new Set<(path: string) => boolean>()
   constructor(ctx: Context, config: Config) {
     super(ctx, 'sandboxPolicy')
     // schemastery (static Config) already filled `mode`; the cast records that
@@ -182,7 +191,9 @@ export class SandboxPolicyService extends Service {
    * configured root is the fallback for agentless calls and sessions without a
    * cwd. The session's last `sandbox/extra-roots` event supplies the extra
    * writable roots; the field is absent when no event or an empty list was
-   * logged, which is exactly the single-root policy.
+   * logged, which is exactly the single-root policy. A workspace root claimed
+   * by a registered execution world skips host absolute-path validation (see
+   * {@link registerPathClaim}).
    * @param request - optional session and approved mode override.
    * @returns the fully resolved per-call mode and absolute workspace root.
    */
@@ -191,12 +202,37 @@ export class SandboxPolicyService extends Service {
     const extraRoots = session === undefined
       ? undefined
       : this.ctx.sessionProjections.stateOf(session, 'sandboxExtraRoots') ?? undefined
+    const workspaceRoot = session?.header.cwd ?? this.workspaceRoot
     return {
       mode: request.mode ?? (session === undefined ? undefined : this.overrideOf(session)) ?? this.defaultMode,
-      workspaceRoot: resolveWorkspaceRoot(session?.header.cwd ?? this.workspaceRoot),
+      workspaceRoot: resolveWorkspaceRoot(workspaceRoot, this.claimedByWorld(workspaceRoot)),
       ...session === undefined ? {} : { sessionId: session.id },
       ...extraRoots === undefined || extraRoots.length === 0 ? {} : { extraWritableRoots: [...extraRoots] },
     }
+  }
+
+  /**
+   * Register an execution world's path ownership claim. While registered, a
+   * claimed workspace root skips this host's absolute-path validation at
+   * resolve time — the claiming world's backend enforces its own path grammar
+   * and fencing. The world registry wires its ownership here; this service
+   * never imports the world side (the dependency points one way).
+   * @param claim - predicate reporting whether a path belongs to the caller's world.
+   * @returns the claim's disposer.
+   */
+  registerPathClaim(claim: (path: string) => boolean): () => void {
+    this.pathClaims.add(claim)
+    return () => {
+      this.pathClaims.delete(claim)
+    }
+  }
+
+  /** Whether any registered world claims a path. */
+  private claimedByWorld(path: string): boolean {
+    for (const claim of this.pathClaims) {
+      if (claim(path)) return true
+    }
+    return false
   }
 
   /**

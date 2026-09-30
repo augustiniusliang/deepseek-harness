@@ -77,6 +77,8 @@ This section explains policy resolution, the per-session store, and the model-vi
 
 `resolve({ session, mode })` returns one complete per-call policy: an approved explicit mode outranks the session's last `sandbox/mode` event, which outranks the deployment default. The session's immutable `cwd` supplies the workspace root; otherwise the configured fallback applies. The session's last `sandbox/extra-roots` event supplies its extra writable roots, and the field is absent when no such event or an empty list was logged — exactly the single-root policy. Absolute execution-world spelling is preserved. Enforcing providers canonicalize the roots on their own filesystem, so remote `symlink/..` paths are never resolved on the Harness host.
 
+The workspace root must satisfy the host's absolute-path grammar — with one registered exception: an execution world (the `ctx.worlds` registry from `@deepseek-ai/dsh-world`) claims the paths it owns through `registerPathClaim`, and a claimed root skips host absolute validation because the claiming backend's own filesystem enforces absoluteness and fencing for its path grammar. The claim is a narrow predicate this service holds, so the policy home never imports the world side; the dependency points one way, and disposing the world registration restores host validation.
+
 ### The per-session store
 
 A runtime switch is one log-only `sandbox/mode` event on the session it applies to — the switch IS its event, and nothing mutates mode state out of band. `effective = explicit grant ?? fold(events) ?? deployment default`, so an override survives restart by replay and two sessions never see each other's state. Workspace identity needs no event: the immutable `SessionHeader.cwd` recorded at creation is the root for every call in that session, and the extra writable roots are a second log-only kit — one `sandbox/extra-roots` event per change, folded into `sandboxExtraRoots` by its own projection unit — never a deployment config. The events stay log-only; before each request, the owner contributes the current facts to the full runtime-context snapshot, and the agent loop logs that snapshot as a sourced `user/message`.
@@ -117,7 +119,7 @@ Start with the subsystem reference for the shared vocabulary, then the seam cont
 
 #### What the model sees
 
-One `sandbox:policy` contribution in the current runtime-context snapshot for every agent session. It does not enumerate mounted capabilities. Tool plugins retain operation and escalation guidance, approval policy contributes separately to the same snapshot, and plan guidance remains `dsh-plan-mode`'s system section.
+One `sandbox:policy` contribution in the current runtime-context snapshot for every agent session. It does not enumerate mounted capabilities. Tool plugins retain operation and escalation guidance, approval policy contributes separately to the same snapshot, and plan guidance remains `dsh-plan-mode`'s system section. The `Additional writable roots: […]` clause appears only when the session logged a non-empty `sandbox/extra-roots` list; without one the `workspace-write` text is byte-identical to the form shown minus that clause.
 
 ##### Read-only
 
@@ -130,8 +132,6 @@ Current DSH file policy: read-only. Any available operation enforced by the DSH 
 ```markdown
 Current DSH file policy: workspace-write. Any available operation enforced by the DSH file sandbox may modify files under the session workspace: "<workspace root>". Additional writable roots: ["<extra root>"]. Some platform temporary areas may also be writable.
 ```
-
-The `Additional writable roots: […]` clause appears only when the session logged a non-empty `sandbox/extra-roots` list; without one the text is byte-identical to the single-root form above minus that clause.
 
 ##### Danger-full-access
 

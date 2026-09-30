@@ -211,11 +211,24 @@ The sandbox-policy service (`ctx.sandboxPolicy`). Owns the deployment default mo
  * configured root is the fallback for agentless calls and sessions without a
  * cwd. The session's last `sandbox/extra-roots` event supplies the extra
  * writable roots; the field is absent when no event or an empty list was
- * logged, which is exactly the single-root policy.
+ * logged, which is exactly the single-root policy. A workspace root claimed
+ * by a registered execution world skips host absolute-path validation (see
+ * {@link registerPathClaim}).
  * @param request - optional session and approved mode override.
  * @returns the fully resolved per-call mode and absolute workspace root.
  */
 resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
+
+/**
+ * Register an execution world's path ownership claim. While registered, a
+ * claimed workspace root skips this host's absolute-path validation at
+ * resolve time — the claiming world's backend enforces its own path grammar
+ * and fencing. The world registry wires its ownership here; this service
+ * never imports the world side (the dependency points one way).
+ * @param claim - predicate reporting whether a path belongs to the caller's world.
+ * @returns the claim's disposer.
+ */
+registerPathClaim(claim: (path: string) => boolean): () => void
 
 /**
  * Read the session override without applying the deployment default.

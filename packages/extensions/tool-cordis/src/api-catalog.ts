@@ -1846,9 +1846,15 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy',
-        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd. The session\'s last `sandbox/extra-roots` event supplies the extra writable roots; the field is absent when no event or an empty list was logged, which is exactly the single-root policy.',
+        description: 'Resolve the complete policy for one capability call. An approved explicit mode outranks the session\'s last `sandbox/mode` event, which outranks the deployment default. A session cwd is its workspace-write boundary; the configured root is the fallback for agentless calls and sessions without a cwd. The session\'s last `sandbox/extra-roots` event supplies the extra writable roots; the field is absent when no event or an empty list was logged, which is exactly the single-root policy. A workspace root claimed by a registered execution world skips host absolute-path validation (see registerPathClaim).',
         parameters: [{ name: 'request', description: 'optional session and approved mode override.' }],
         returns: 'the fully resolved per-call mode and absolute workspace root.',
+      },
+      {
+        signature: 'registerPathClaim(claim: (path: string) => boolean): () => void',
+        description: 'Register an execution world\'s path ownership claim. While registered, a claimed workspace root skips this host\'s absolute-path validation at resolve time — the claiming world\'s backend enforces its own path grammar and fencing. The world registry wires its ownership here; this service never imports the world side (the dependency points one way).',
+        parameters: [{ name: 'claim', description: 'predicate reporting whether a path belongs to the caller\'s world.' }],
+        returns: 'the claim\'s disposer.',
       },
       {
         signature: 'overrideOf(session: Session): SandboxMode | undefined',
@@ -3727,6 +3733,37 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
     ],
   },
+  {
+    key: 'worlds',
+    summary: 'The execution-world registry service (`ctx.worlds`).',
+    description: 'The execution-world registry service (`ctx.worlds`). Owns the backend list (registration order is routing priority, local last and implicit), path/cwd resolution, cwd detection, and the `world` session projection. When the sandbox-policy service is present, the registry also contributes its path ownership as a policy path claim, so a world-owned workspace root (a POSIX WSL path on a Windows host) passes policy resolution without host absolute validation — the owning backend\'s filesystem enforces its own fencing.',
+    methods: [
+      {
+        signature: 'register(backend: WorldBackend): () => void',
+        description: 'Register one execution-world backend; registration order is routing priority, and disposal removes the backend.',
+        parameters: [{ name: 'backend', description: 'the backend to register.' }],
+        returns: 'the registration\'s disposer.',
+      },
+      {
+        signature: 'resolve(opts: { path?: string; cwd?: string } = {}): WorldBackend',
+        description: 'Resolve one path or cwd to its owning backend. A path a backend claims outranks cwd detection; an unclaimed input falls back to the local world.',
+        parameters: [{ name: 'opts', description: 'the path and/or cwd to route.' }],
+        returns: 'the owning backend, or the local fallback.',
+      },
+      {
+        signature: 'detectWorldForCwd(cwd?: string): WorldRef',
+        description: 'Detect the world a session cwd belongs to.',
+        parameters: [{ name: 'cwd', description: 'the session\'s creation cwd; undefined detects nothing.' }],
+        returns: 'the first detecting backend\'s reference, or `\'local\'`.',
+      },
+      {
+        signature: 'list(): { ref: WorldRef; displayName: string }[]',
+        description: 'List every registered world plus the local fallback, in routing order.',
+        parameters: [],
+        returns: 'one entry per world, for UI display and remote export.',
+      },
+    ],
+  },
 ]
 
 /** Every harness event, sorted by name. */
@@ -5170,6 +5207,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'FileReferenceCandidate',
     declaration: 'export interface FileReferenceCandidate {\n    path: string;\n    kind: \'file\' | \'directory\';\n}',
+  },
+  {
+    name: 'FileSystem',
+    declaration: 'export abstract class FileSystem extends Service {\n    constructor(ctx: Context);\n    watch(target: FsTarget, changed: (error?: Error) => void, signal: AbortSignal): Promise<() => Promise<void>>;\n    get sandboxMode(): SandboxMode | undefined;\n    abstract resolve(path: string, opts?: {\n        cwd?: string;\n        signal?: AbortSignal;\n    }): Promise<FsTarget>;\n    abstract processPath(target: FsTarget): string;\n    processPathFromHostPath(hostPath: string): string | undefined;\n    abstract fileUrl(target: FsTarget): string;\n    abstract contains(parent: FsTarget, child: FsTarget): boolean;\n    abstract stat(target: FsTarget, signal?: AbortSignal): Promise<FsInfo | undefined>;\n    abstract lstat(path: string, opts?: {\n        cwd?: string;\n    }, signal?: AbortSignal): Promise<FsPathInfo | undefined>;\n    abstract readText(target: FsTarget, signal?: AbortSignal): Promise<string>;\n    abstract streamText(target: FsTarget, signal?: AbortSignal): Promise<AsyncIterable<string>>;\n    abstract readBytes(target: FsTarget, signal: AbortSignal | undefined, maxBytes: number): Promise<Uint8Array>;\n    abstract readByteRange(target: FsTarget, range: {\n        offset: number;\n        length: number;\n    }, signal?: AbortSignal): Promise<Uint8Array>;\n    abstract listDir(target: FsTarget, signal?: AbortSignal): Promise<FsDirEntry[]>;\n    abstract writeText(target: FsTarget, content: string, expected?: FsWriteIntent, signal?: AbortSignal, sandboxPolicy?: SandboxExecutionPolicy): Promise< /* …truncated — full shape in source */',
   },
   {
     name: 'FileUploadReceiptId',
@@ -7312,6 +7353,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface SubprocessOutputReader {\n    readFrom(fromByte: number): SubprocessOutputRead;\n}',
   },
   {
+    name: 'SubprocessRuntime',
+    declaration: 'export abstract class SubprocessRuntime extends Service {\n    constructor(ctx: Context);\n    abstract resolveExecutable(command: string, env?: Readonly<Record<string, string>>, signal?: AbortSignal): Promise<string>;\n    abstract terminalEnvironment(signal?: AbortSignal): Promise<SubprocessTerminalEnvironment>;\n    abstract spawn(spec: SubprocessSpawnSpec): SubprocessHandle;\n    abstract spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<SubprocessTerminalHandle>;\n}',
+  },
+  {
     name: 'SubprocessSpawnSpec',
     declaration: 'export interface SubprocessSpawnSpec {\n    argv: readonly string[];\n    cwd: string;\n    stdio: SubprocessStdio;\n    graceMs: number;\n    signal?: AbortSignal | undefined;\n    env?: NodeJS.ProcessEnv | undefined;\n}',
   },
@@ -8122,6 +8167,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'WorkspaceView',
     declaration: 'export interface WorkspaceView {\n    readonly workspaceId: WorkspaceId;\n    readonly path: string;\n    readonly title: string;\n    readonly sessionIds: readonly SessionId[];\n    readonly createdAt: string;\n    readonly updatedAt: string;\n}',
+  },
+  {
+    name: 'WorldBackend',
+    declaration: 'export interface WorldBackend {\n    ref: WorldRef;\n    displayName: string;\n    ownsPath(absPath: string): boolean;\n    detectFromCwd(cwd: string): WorldRef | null;\n    fs: FileSystem;\n    subprocess: SubprocessRuntime;\n}',
+  },
+  {
+    name: 'WorldRef',
+    declaration: 'export type WorldRef = string;',
   },
 ]
 

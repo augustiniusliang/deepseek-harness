@@ -1,0 +1,19 @@
+# Bilingual-pair consistency record for world.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write docs/subsystems/world.md
+/execution-worlds:
+  en: 471a28cb37c82a42
+  zh: 8c6e9795cc889178
+/execution-worlds/the-world-reference:
+  en: 41965cbe075686e6
+  zh: 8b0a97f01e75e7b2
+/execution-worlds/the-backend-contract:
+  en: 353328f3fb1e4d51
+  zh: de4c7bd92d14eaad
+/execution-worlds/routing-precedence:
+  en: 0bf776a9a0723f22
+  zh: f77bd1600a009699
+/execution-worlds/the-per-session-record:
+  en: 8310964d416e26b6
+  zh: 2affcd8720fd2391

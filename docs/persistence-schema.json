@@ -14793,6 +14793,76 @@
       }
     },
     {
+      "key": "event:session/world",
+      "kind": "event",
+      "event": "session/world",
+      "surface": false,
+      "digest": "3dd09025bb791bf64b2a259cb031081c08b60b08e7be68a7647d6a85dd2de7fe",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "world",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "session/world"
+          }
+        ]
+      }
+    },
+    {
       "key": "event:step/end",
       "kind": "event",
       "event": "step/end",
@@ -36495,6 +36565,74 @@
       ]
     },
     {
+      "digest": "3dd09025bb791bf64b2a259cb031081c08b60b08e7be68a7647d6a85dd2de7fe",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "data",
+                "type": 1,
+                "optional": false
+              },
+              {
+                "name": "ignorable",
+                "type": 3,
+                "optional": true
+              },
+              {
+                "name": "seq",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "time",
+                "type": 4,
+                "optional": false
+              },
+              {
+                "name": "type",
+                "type": 5,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "world",
+                "type": 2,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          },
+          {
+            "kind": "literal",
+            "value": true
+          },
+          {
+            "kind": "primitive",
+            "type": "number"
+          },
+          {
+            "kind": "literal",
+            "value": "session/world"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
+    },
+    {
       "digest": "3e0eff5946255ff05d88a10839c60305135801f97794ea48d409f8503303317e",
       "schema": {
         "root": 0,
@@ -44910,7 +45048,8 @@
         "packages/webhook/webhook/src/brand.ts#WebhookDeliveryId",
         "packages/webhook/webhook/src/brand.ts#WebhookRuleId",
         "packages/webhook/webhook/src/brand.ts#WebhookSourceId",
-        "packages/workflow/workflow/src/types.ts#WorkflowRunId"
+        "packages/workflow/workflow/src/types.ts#WorkflowRunId",
+        "packages/world/world/src/types.ts#WorldRef"
       ],
       "sources": [
         "packages/api/session-controller/src/types.ts:398",
@@ -44935,7 +45074,8 @@
         "packages/webhook/webhook/src/brand.ts:12",
         "packages/webhook/webhook/src/brand.ts:6",
         "packages/webhook/webhook/src/brand.ts:9",
-        "packages/workflow/workflow/src/types.ts:13"
+        "packages/workflow/workflow/src/types.ts:13",
+        "packages/world/world/src/types.ts:16"
       ]
     },
     {
@@ -54757,6 +54897,20 @@
       "sources": [
         "packages/llm/llm/src/message.ts:35"
       ]
+    },
+    {
+      "digest": "661cb99f50d098a095030fde375af584f11307e1e47e29fa61c3e5dc0754f264",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "literal",
+            "value": "session/world"
+          }
+        ]
+      },
+      "names": [],
+      "sources": []
     },
     {
       "digest": "66ba70f6f068da443f969a0b947a013c3addd776b9b60a0a393759c19825e9a2",
@@ -83861,6 +84015,33 @@
       "names": [],
       "sources": [
         "packages/core/session/src/types.ts:228"
+      ]
+    },
+    {
+      "digest": "ed310d83582cf406b905a3905d323706e3fadf0e23a71231951a72289b8b5517",
+      "schema": {
+        "root": 0,
+        "nodes": [
+          {
+            "kind": "object",
+            "properties": [
+              {
+                "name": "world",
+                "type": 1,
+                "optional": false
+              }
+            ],
+            "indices": []
+          },
+          {
+            "kind": "primitive",
+            "type": "string"
+          }
+        ]
+      },
+      "names": [],
+      "sources": [
+        "packages/world/world/src/session-world.ts:25"
       ]
     },
     {
