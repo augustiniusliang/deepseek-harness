@@ -604,6 +604,79 @@ describe('workspace browser rows', () => {
     expect(screen.queryByRole('button', { name: /工作区/ })).toBeNull()
   })
 
+  it('project-owned row leads the project name with its folder count and carries the project verbs', () => {
+    const rename = vi.fn()
+    const manageRoots = vi.fn()
+    const remove = vi.fn()
+    const group: GroupNode = {
+      key: 'alpha', workspaceId: wid('alpha'), cwd: '/w/alpha', createdAt: 0, label: '科研项目',
+      project: { id: 'p1', name: '科研项目', roots: [{ path: '/w/alpha' }, { path: '/w/data' }], createdAt: 5 },
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={vi.fn()}
+      actions={{ rename, manageRoots, delete: remove }} t={t}
+    />)
+    expect(screen.getByText('科研项目')).toBeTruthy()
+    expect(screen.getByText('2 个文件夹')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '工作区“科研项目”的操作' }))
+    expect(screen.getByRole('menuitem', { name: '重命名项目' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '删除项目' }).className).toMatch(/danger/)
+    fireEvent.click(screen.getByRole('menuitem', { name: '管理文件夹…' }))
+    expect(manageRoots).toHaveBeenCalledOnce()
+    expect(rename).not.toHaveBeenCalled()
+    expect(remove).not.toHaveBeenCalled()
+  })
+
+  it('project-owned row without the folder verb keeps the row out of its menu', () => {
+    const group: GroupNode = {
+      key: 'alpha', workspaceId: wid('alpha'), cwd: '/w/alpha', createdAt: 0, label: 'Solo',
+      project: { id: 'p1', name: 'Solo', roots: [{ path: '/w/alpha' }], createdAt: 5 },
+      sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+    }
+    render(<ProjectRowItem
+      group={group} onToggle={vi.fn()} onCreate={vi.fn()}
+      actions={{ rename: vi.fn(), delete: vi.fn() }} t={t}
+    />)
+    // One root reads in the singular, and a caller that offers no folder
+    // management gets no dead row.
+    expect(screen.getByText('1 个文件夹')).toBeTruthy()
+    fireEvent.click(screen.getByRole('button', { name: '工作区“Solo”的操作' }))
+    expect(screen.queryByRole('menuitem', { name: '管理文件夹…' })).toBeNull()
+    expect(screen.getByRole('menuitem', { name: '重命名项目' })).toBeTruthy()
+  })
+
+  it('project hover card lists every root, primary first, and still copies the primary path', async () => {
+    vi.useFakeTimers()
+    const writeText = vi.fn(async () => {})
+    const restoreClipboard = installClipboard(writeText)
+    try {
+      const group: GroupNode = {
+        key: 'alpha', workspaceId: wid('alpha'), cwd: '/home/u/alpha', createdAt: 0, label: '科研项目',
+        project: {
+          id: 'p1', name: '科研项目',
+          roots: [{ path: '/home/u/alpha' }, { path: '/home/u/data' }], createdAt: 5,
+        },
+        sessionCount: 0, expanded: false, containsCurrent: false, sessions: [],
+      }
+      render(<ProjectRowItem group={group} home="/home/u" onToggle={vi.fn()} onCreate={vi.fn()} t={t} />)
+      fireEvent.pointerEnter(screen.getByRole('treeitem').parentElement as HTMLElement)
+      act(() => { vi.advanceTimersByTime(800) })
+      expect(screen.getAllByText('科研项目')).toHaveLength(2)
+      expect(screen.getByText('主根')).toBeTruthy()
+      expect(screen.getByText('额外根 1')).toBeTruthy()
+      expect(screen.getByText('~/alpha')).toBeTruthy()
+      expect(screen.getByText('~/data')).toBeTruthy()
+      // The project's own roots replace the single Workspace path line.
+      expect(screen.queryByText('/home/u/alpha')).toBeNull()
+      await act(async () => { fireEvent.click(screen.getByRole('button', { name: '复制: /home/u/alpha' })) })
+      expect(writeText).toHaveBeenCalledWith('/home/u/alpha')
+    } finally {
+      restoreClipboard()
+      vi.useRealTimers()
+    }
+  })
+
   it('blank New Session rows carry no menu, no time label, and no hover-card time', () => {
     vi.useFakeTimers()
     try {

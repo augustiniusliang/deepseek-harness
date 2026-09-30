@@ -13,6 +13,7 @@ import type { MainPanelId } from '@deepseek-ai/dsh-client-ui-layout/client'
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import { en as commonEn } from '@deepseek-ai/dsh-client-locale/src/locales/en.ts'
 import type { DirectoryFlowOwnerProps, WorkspaceBrowserProps } from '../src/client/contract/slots.ts'
+import type { Project, ProjectCreateInput, ProjectOverlay, ProjectRoots, ProjectUpdateInput } from '../src/client/projects.ts'
 import { createWorkspaceShortcutControls } from '../src/client/shortcuts.ts'
 import { createWorkspaceViewStore, FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
@@ -78,6 +79,11 @@ const workspaceState = (
   phase: 'ready',
   error: null,
 })
+const project = (id: string, name: string, roots: ProjectRoots = [{ path: `/w/${id}` }]): Project => ({
+  id, name, roots, createdAt: Date.parse('2026-01-01T00:00:00.000Z'),
+})
+const overlay = (projects: readonly Project[], attachments: Record<string, string> = {}): ProjectOverlay =>
+  ({ projects, attachments })
 const noPendingInteraction: SessionStatusSnapshot = new Map()
 function hook<T>(snapshot: T) {
   return function select<S>(selector: (state: T) => S): S { return selector(snapshot) }
@@ -122,6 +128,7 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     useSessionRetainInfo: () => undefined,
     usePanelInfo, useResource,
     useWorkspaces: hook(workspaceState([])),
+    useProjects: hook<ProjectOverlay | undefined>(undefined),
     useStore: bindSnapshotSelector(store),
     actions: store.actions,
     startSession: vi.fn(),
@@ -134,6 +141,10 @@ function mount(overrides: Partial<WorkspaceBrowserProps> = {}) {
     unarchiveSession: vi.fn(async () => {}),
     insertWorkspaceBefore: vi.fn(async () => {}),
     createWorkspace: vi.fn(async () => workspace('created', [])),
+    createProject: vi.fn(async (input: ProjectCreateInput) => project('p-created', input.name, input.roots)),
+    updateProject: vi.fn(async (input: ProjectUpdateInput) => project(input.id, input.name ?? input.id, input.roots)),
+    deleteProject: vi.fn(async () => {}),
+    refreshProjects: vi.fn(async () => {}),
     useDirectoryFlow: bindSnapshotSelector({ getSnapshot: () => true, subscribe: () => () => {} }),
     useHostInfo: selector => selector({ home: undefined, isLoopback: true }),
     renderSlot: renderDirectoryFlowOnly,
@@ -2404,6 +2415,131 @@ describe('WorkspaceBrowser', () => {
     fireEvent.change(screen.getByPlaceholderText('搜索会话名称'), { target: { value: 'needle' } })
     const row = screen.getByText('Needle A').closest('[role="treeitem"]') as HTMLElement
     expect(row.hasAttribute('draggable')).toBe(false)
+  })
+})
+
+describe('WorkspaceBrowser project overlay', () => {
+  const alpha = project('p1', '科研项目', [{ path: '/projects/alpha' }, { path: '/projects/data' }])
+
+  /** Browser with one project-owned Workspace beside a plain one. */
+  function mountProjects(overrides: Partial<WorkspaceBrowserProps> = {}) {
+    return mount({
+      useSessions: hook(sessionState([summary('session', 2), summary('other', 1)])),
+      useWorkspaces: hook(workspaceState([
+        workspace('alpha', ['session'], 'Alpha folder'),
+        workspace('beta', ['other'], 'Beta folder'),
+      ])),
+      useProjects: hook<ProjectOverlay | undefined>(overlay([alpha])),
+      ...overrides,
+    })
+  }
+
+  /** Open one row menu entry by its visible label. */
+  function pickMenu(name: string): void {
+    fireEvent.click(screen.getByRole('button', { name: '工作区“科研项目”的操作' }))
+    fireEvent.click(screen.getByRole('menuitem', { name }))
+  }
+
+  it('presents a project-owned Workspace under the project name and its folder count', () => {
+    mountProjects()
+    expect(screen.getByText('科研项目')).toBeTruthy()
+    expect(screen.getByText('2 个文件夹')).toBeTruthy()
+    // The plain Workspace keeps its own title and gains no count.
+    expect(screen.getByText('Beta folder')).toBeTruthy()
+    expect(screen.queryByText('Alpha folder')).toBeNull()
+    expect(screen.queryByText('1 个文件夹')).toBeNull()
+  })
+
+  it('lists every project root, primary first, on the group hover card', () => {
+    vi.useFakeTimers()
+    try {
+      mountProjects({
+        useWorkspaces: hook(workspaceState([{ ...workspace('alpha', [], 'Alpha folder'), path: '/home/u/alpha' }])),
+        useProjects: hook<ProjectOverlay | undefined>(overlay([
+          project('p1', '科研项目', [{ path: '/home/u/alpha' }, { path: '/home/u/data' }]),
+        ])),
+        useHostInfo: selector => selector({ home: '/home/u', isLoopback: true }),
+      })
+      fireEvent.pointerEnter(screen.getByText('科研项目').closest('[role="treeitem"]')!.parentElement as HTMLElement)
+      act(() => { vi.advanceTimersByTime(800) })
+      expect(screen.getByText('主根')).toBeTruthy()
+      expect(screen.getByText('额外根 1')).toBeTruthy()
+      expect(screen.getByText('~/alpha')).toBeTruthy()
+      expect(screen.getByText('~/data')).toBeTruthy()
+    } finally {
+      vi.useRealTimers()
+    }
+  })
+
+  it('renames the project through its own dialog', async () => {
+    const updateProject = vi.fn(async (input: ProjectUpdateInput) => project(input.id, input.name ?? 'x'))
+    const b = mountProjects({ updateProject })
+    pickMenu('重命名项目')
+    expect(screen.getByRole('dialog', { name: '重命名项目' })).toBeTruthy()
+    const input = screen.getByLabelText<HTMLInputElement>('项目名称')
+    expect(input.value).toBe('科研项目')
+    // An unchanged or blank draft stays blocked.
+    const confirm = screen.getByRole<HTMLButtonElement>('button', { name: '重命名' })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(input, { target: { value: '   ' } })
+    expect(confirm.disabled).toBe(true)
+    fireEvent.change(input, { target: { value: '新项目名' } })
+    // A project name is display-only: another Workspace's title is no conflict.
+    expect(screen.queryByRole('alert')).toBeNull()
+    fireEvent.click(confirm)
+    await waitFor(() => { expect(updateProject).toHaveBeenCalledWith({ id: 'p1', name: '新项目名' }) })
+    expect(b.props.renameWorkspace).not.toHaveBeenCalled()
+  })
+
+  it('manages the project folders with its primary root fixed', async () => {
+    const updateProject = vi.fn(async () => alpha)
+    mountProjects({ updateProject })
+    pickMenu('管理文件夹…')
+    expect(screen.getByRole('dialog', { name: '管理「科研项目」的文件夹' })).toBeTruthy()
+    expect(screen.getByText('/projects/alpha')).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('额外根 1'), { target: { value: '/projects/data2' } })
+    fireEvent.click(screen.getByRole('button', { name: '添加文件夹' }))
+    fireEvent.change(screen.getByLabelText('额外根 2'), { target: { value: '/projects/logs' } })
+    fireEvent.click(screen.getByRole('button', { name: '保存' }))
+    await waitFor(() => {
+      expect(updateProject).toHaveBeenCalledWith({
+        id: 'p1',
+        roots: [{ path: '/projects/alpha' }, { path: '/projects/data2' }, { path: '/projects/logs' }],
+      })
+    })
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: '管理「科研项目」的文件夹' })).toBeNull() })
+  })
+
+  it('deletes only the project grouping and states the retention boundary', async () => {
+    const deleteProject = vi.fn(async () => {})
+    const b = mountProjects({ deleteProject })
+    pickMenu('删除项目')
+    const dialog = screen.getByRole('dialog', { name: '删除项目' })
+    expect(dialog.textContent).toContain('将只解除「科研项目」的项目分组')
+    expect(dialog.textContent).toContain('文件夹、会话与记录都会保留')
+    fireEvent.click(screen.getByRole('button', { name: '删除项目' }))
+    await waitFor(() => { expect(deleteProject).toHaveBeenCalledWith('p1') })
+    expect(b.props.deleteWorkspace).not.toHaveBeenCalled()
+    await waitFor(() => { expect(screen.queryByRole('dialog', { name: '删除项目' })).toBeNull() })
+  })
+
+  it('opens the project dialog from the ＋ button when the overlay is served', async () => {
+    const b = mountProjects()
+    expect(screen.queryByRole('button', { name: '添加工作区' })).toBeNull()
+    fireEvent.click(screen.getByRole('button', { name: '新建项目' }))
+    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeTruthy()
+    // The dialog takes the gesture: the directory flow itself never opens.
+    expect(screen.queryByTestId('directory-flow')).toBeNull()
+
+    fireEvent.change(screen.getByLabelText('项目名称'), { target: { value: 'Gamma' } })
+    fireEvent.change(screen.getByLabelText('主根'), { target: { value: '/w/gamma' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '创建项目' })) })
+    expect(b.props.createWorkspace).toHaveBeenCalledWith({ path: '/w/gamma' })
+    expect(b.props.createProject).toHaveBeenCalledWith({ name: 'Gamma', roots: [{ path: '/w/gamma' }] })
+    // Like the pre-project add flow, a created project opens its Workspace and
+    // the dialog gives the surface back.
+    await waitFor(() => { expect(b.props.startSession).toHaveBeenCalledWith(wid('created')) })
+    expect(screen.queryByRole('dialog', { name: '新建项目' })).toBeNull()
   })
 })
 

@@ -1,7 +1,9 @@
 /**
  * Derives the workspace browser tree from caller-projected Workspace and
- * Session order. Unassigned Sessions trail under Ungrouped; only the selected
- * blank Session remains visible.
+ * Session order. A Workspace the project overlay owns is presented as that
+ * project: its group label and hover facts come from the project, and group
+ * keys stay Workspace identities. Unassigned Sessions trail under Ungrouped;
+ * only the selected blank Session remains visible.
  */
 import {
   type SessionListState, type SessionSearchResultItem, type SessionSummary,
@@ -13,6 +15,7 @@ import type {
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { workspaceTitleOf } from '@deepseek-ai/dsh-util-workspace-path'
+import type { Project, ProjectOverlay } from './projects.ts'
 
 /** Group key for Sessions outside every Workspace. */
 export const UNGROUPED_KEY = ''
@@ -74,6 +77,8 @@ export interface GroupNode {
   /** Workspace creation time (epoch ms); absent only for the ungrouped bucket. */
   createdAt: number | undefined
   label: string
+  /** Project owning this Workspace, when the overlay matched it; the label is then the project name. */
+  project?: Project | undefined
   /** Total visible sessions in the group. */
   sessionCount: number
   expanded: boolean
@@ -119,6 +124,7 @@ interface Group {
   cwd: string | undefined
   createdAt: number | undefined
   label: string
+  project: Project | undefined
   sessions: SessionSummary[]
 }
 
@@ -132,6 +138,43 @@ export function workspaceLabel(cwd: string | undefined): string {
   if (cwd === undefined || cwd === '') return ''
   const base = workspaceTitleOf(cwd)
   return base !== '' ? base : cwd
+}
+
+/**
+ * Compare two directory paths as one Workspace's identity: Windows spellings
+ * fold case and either separator, and trailing separators never separate two
+ * spellings of the same directory. POSIX spellings stay case-sensitive.
+ * @param a - one directory path.
+ * @param b - the other directory path.
+ * @returns whether both name the same Workspace directory.
+ */
+function sameWorkspaceDirectory(a: string, b: string): boolean {
+  const windows = /^[A-Za-z]:[/\\]/.test(a) || a.startsWith('\\\\')
+  const left = folderPath(a)
+  const right = folderPath(b)
+  return windows ? left.toLowerCase() === right.toLowerCase() : left === right
+}
+
+/**
+ * Resolve the project owning one Workspace: an explicit Session attachment
+ * first, then the project whose primary root is the Workspace directory.
+ * @param workspace - Workspace directory and Session membership.
+ * @param overlay - published project overlay; absent leaves every Workspace unowned.
+ * @returns the owning project, or undefined in the plain Workspace presentation.
+ */
+export function owningProject(
+  workspace: Pick<WorkspaceView, 'path' | 'sessionIds'>,
+  overlay: ProjectOverlay | undefined,
+): Project | undefined {
+  if (overlay === undefined) return undefined
+  const attached = workspace.sessionIds
+    .map(sessionId => overlay.attachments[sessionId])
+    .find(projectId => projectId !== undefined)
+  const bound = attached === undefined
+    ? undefined
+    : overlay.projects.find(project => project.id === attached)
+  if (bound !== undefined) return bound
+  return overlay.projects.find(project => sameWorkspaceDirectory(project.roots[0].path, workspace.path))
 }
 
 /**
@@ -304,8 +347,9 @@ function buildGroup(
   createdAt: number | undefined,
   label: string,
   members: readonly SessionSummary[],
+  project: Project | undefined,
 ): Group {
-  return { key, workspaceId, cwd, createdAt, label, sessions: [...members] }
+  return { key, workspaceId, cwd, createdAt, label, project, sessions: [...members] }
 }
 
 /** Apply a stored Ungrouped order and append newly loose Sessions by recency. */
@@ -327,9 +371,10 @@ function orderedUngrouped(
 
 /**
  * Group Sessions by Workspace: one group per caller-ordered entity, with
- * members resolved from caller-ordered sessionIds. Sessions outside every
- * Workspace trail in the browser-local Ungrouped order, which falls back to
- * recency before that order is initialized.
+ * members resolved from caller-ordered sessionIds. A Workspace the project
+ * overlay owns takes the project's name as its group label. Sessions outside
+ * every Workspace trail in the browser-local Ungrouped order, which falls
+ * back to recency before that order is initialized.
  */
 function groupByWorkspace(
   list: SessionListState,
@@ -337,6 +382,7 @@ function groupByWorkspace(
   archived: ReadonlySet<SessionId>,
   archivedFilter: ArchivedFilter,
   ungroupedOrder: readonly string[] | undefined,
+  projects: ProjectOverlay | undefined,
 ): Group[] {
   const current = mainSessionId(list)
   const groups: Group[] = []
@@ -353,9 +399,10 @@ function groupByWorkspace(
     // The archived-only view lists archives, not the Workspace inventory, so
     // a Workspace without archived Sessions contributes no group.
     if (archivedFilter === 'only' && members.length === 0) continue
+    const project = owningProject(workspace, projects)
     groups.push(buildGroup(
       workspace.workspaceId, workspace.workspaceId, workspace.path,
-      Date.parse(workspace.createdAt), workspace.title, members,
+      Date.parse(workspace.createdAt), project?.name ?? workspace.title, members, project,
     ))
   }
   const stray = list.ids
@@ -370,6 +417,7 @@ function groupByWorkspace(
       undefined,
       '',
       orderedUngrouped(stray, ungroupedOrder, list.byId),
+      undefined,
     ))
   }
   return groups
@@ -431,6 +479,7 @@ function sessionNode(
  * @param rowState - registry-global pin and archive sets plus the archived filter.
  * @param statuses - unified UI status by Session.
  * @param view - local expansion arrays.
+ * @param projects - project overlay owning some Workspaces; absent keeps every group a plain Workspace.
  * @returns group sections in render order.
  */
 export function deriveGroups(
@@ -439,6 +488,7 @@ export function deriveGroups(
   rowState: SessionRowState,
   statuses: SessionStatuses,
   view: TreeView,
+  projects?: ProjectOverlay,
 ): GroupNode[] {
   const archived = new Set(rowState.archivedSessionIds)
   const pinned = new Set(rowState.pinnedSessionIds)
@@ -448,7 +498,7 @@ export function deriveGroups(
     ? undefined
     : owningGroupKey(workspaces, current)
   const groups: GroupNode[] = []
-  for (const g of groupByWorkspace(list, workspaces, archived, rowState.archivedFilter, view.ungroupedOrder)) {
+  for (const g of groupByWorkspace(list, workspaces, archived, rowState.archivedFilter, view.ungroupedOrder, projects)) {
     const expanded = expandedGroups.has(g.key)
     groups.push({
       key: g.key,
@@ -456,6 +506,7 @@ export function deriveGroups(
       cwd: g.cwd,
       createdAt: g.createdAt,
       label: g.label,
+      project: g.project,
       sessionCount: g.sessions.length,
       expanded,
       containsCurrent: g.key === currentGroup,

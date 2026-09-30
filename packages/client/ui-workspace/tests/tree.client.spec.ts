@@ -8,9 +8,10 @@ import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { SessionProjectionSnapshot } from '@deepseek-ai/dsh-api-session-controller/client'
 import {
   type ArchivedFilter,
-  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
+  deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder, owningProject,
   pinCurrentBlank, reconcileManualOrder, sessionMemberIds, visibleSessionIds, workspaceLabel, UNGROUPED_KEY,
 } from '../src/client/tree.ts'
+import type { Project, ProjectOverlay } from '../src/client/projects.ts'
 import { createWorkspaceViewStore } from '../src/client/stores.ts'
 
 const sid = (id: string) => id as SessionId
@@ -213,6 +214,62 @@ describe('Session ordering', () => {
       .toEqual([sid('blank'), sid('newer'), sid('older')])
     expect(pinCurrentBlank([sid('newer'), sid('older')], undefined))
       .toEqual([sid('newer'), sid('older')])
+  })
+})
+
+describe('owningProject', () => {
+  const project = (id: string, name: string, ...paths: [string, ...string[]]): Project =>
+    ({ id, name, roots: [{ path: paths[0] }, ...paths.slice(1).map(path => ({ path }))], createdAt: 0 })
+  const overlay = (projects: readonly Project[], attachments: Record<string, string> = {}): ProjectOverlay =>
+    ({ projects, attachments })
+
+  it('matches the primary root and folds Windows spellings', () => {
+    const alpha = project('p1', 'Alpha', '/projects/alpha', '/projects/data')
+    expect(owningProject(workspace('alpha', []), overlay([alpha]))?.id).toBe('p1')
+    // A root everywhere but first is not the project's Workspace.
+    expect(owningProject(workspace('data', []), overlay([alpha]))).toBeUndefined()
+    const windows = project('p2', 'Beta', String.raw`C:\work\Beta`)
+    expect(owningProject({ ...workspace('beta', []), path: 'c:/WORK/beta/' }, overlay([windows]))?.id).toBe('p2')
+  })
+
+  it('prefers an explicit Session attachment over the primary root match', () => {
+    const attached = project('p2', 'Beta', '/projects/elsewhere')
+    const byRoot = project('p1', 'Alpha', '/projects/alpha')
+    const members = { ...workspace('alpha', ['s1']), path: '/projects/alpha' }
+    expect(owningProject(members, overlay([byRoot, attached], { s1: 'p2' }))?.id).toBe('p2')
+    // A stale binding falls back to the Workspace's own primary root.
+    expect(owningProject(members, overlay([byRoot], { s1: 'gone' }))?.id).toBe('p1')
+  })
+
+  it('leaves every Workspace unowned without an overlay', () => {
+    expect(owningProject(workspace('alpha', ['s1']), undefined)).toBeUndefined()
+  })
+})
+
+describe('deriveGroups with a project overlay', () => {
+  it('presents a project-owned Workspace as its project and leaves the rest as Workspaces', () => {
+    const sessions = list(summary('owned', 2), summary('plain', 1))
+    const workspaces = [workspace('alpha', ['owned'], 'Alpha folder'), workspace('beta', ['plain'], 'Beta folder')]
+    const groups = deriveGroups(sessions, workspaces, noRows, noAttention, view(['alpha', 'beta']), {
+      projects: [{ id: 'p1', name: '科研项目', roots: [{ path: '/projects/alpha' }, { path: '/projects/data' }], createdAt: 5 }],
+      attachments: { stale: 'p1' },
+    })
+    expect(groups.map(group => [group.key, group.label, group.project?.id, group.sessions.length])).toEqual([
+      ['alpha', '科研项目', 'p1', 1],
+      ['beta', 'Beta folder', undefined, 1],
+    ])
+    // Roots and creation facts travel with the matched project.
+    expect(groups[0]!.project).toMatchObject({
+      name: '科研项目',
+      roots: [{ path: '/projects/alpha' }, { path: '/projects/data' }],
+    })
+  })
+
+  it('keeps every group a plain Workspace without an overlay', () => {
+    const sessions = list(summary('owned', 1))
+    const groups = deriveGroups(sessions, [workspace('alpha', ['owned'], 'Alpha')], noRows, noAttention, view(['alpha']))
+    expect(groups[0]!.project).toBeUndefined()
+    expect(groups[0]!.label).toBe('Alpha')
   })
 })
 

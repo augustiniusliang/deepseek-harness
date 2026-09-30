@@ -26,7 +26,6 @@ import { abbreviateHomePath } from '@deepseek-ai/dsh-util-workspace-path'
 import type { MenuOpenState, WorkspaceBrowserProps } from '../contract/slots.ts'
 import type { GroupNode, SearchResultNode, SessionNode } from '../tree.ts'
 import css from './Rows.module.css'
-
 /** The standard locale seat, prop-passed from the browser root. */
 type RowTranslate = WorkspaceBrowserProps['t']
 
@@ -157,17 +156,36 @@ function createdLabel(createdAt: number, t: RowTranslate): string {
   return t('hover.created', { time: `${date} ${pad2(d.getHours())}:${pad2(d.getMinutes())}` })
 }
 
-/** Hover-card body: workspace title, display directory path, absolute creation time. */
-function WorkspaceHoverContent({ label, cwd, createdAt, t }: {
+/**
+ * Hover-card body: workspace title, display directory path, absolute creation
+ * time. A project-owned group lists every project root instead of the single
+ * Workspace path, primary root first, each tagged by its role.
+ */
+function WorkspaceHoverContent({ label, cwd, createdAt, project, home, t }: {
   label: string
   cwd: string | undefined
   createdAt: number
+  project: GroupNode['project']
+  home?: string | undefined
   t: RowTranslate
 }) {
   return (
     <div className={css.hoverContent}>
       <div className={css.hoverTitle}>{label}</div>
-      <div className={css.hoverPath}>{cwd}</div>
+      {project === undefined
+        ? <div className={css.hoverPath}>{cwd}</div>
+        : (
+          <div className={css.hoverRoots}>
+            {project.roots.map((root, index) => (
+              <div className={css.hoverRoot} key={root.path}>
+                <span className={css.hoverRootTag}>
+                  {index === 0 ? t('project.primaryRoot') : t('project.extraRoot', { n: index })}
+                </span>
+                <span className={css.hoverPath}>{abbreviateHomePath(root.path, home)}</span>
+              </div>
+            ))}
+          </div>
+        )}
       <div className={css.hoverTime}>{createdLabel(createdAt, t)}</div>
     </div>
   )
@@ -203,14 +221,18 @@ function rowHalf(e: { clientY: number; currentTarget: HTMLElement }): 'before' |
 }
 
 /**
- * Project (workspace) header row: folder + title;
- * hover reveals the chevron and create button, and dwelling on a real
- * Workspace shows its hover card (the ungrouped bucket has none).
+ * Project (workspace) header row: folder + title; the folder count of a
+ * project-owned group trails the title, hover reveals the chevron and create
+ * button, and dwelling on a real Workspace shows its hover card (the
+ * ungrouped bucket has none). Its menu carries the verbs of the group's own
+ * kind: workspace rename/delete, or project rename, folder management, and
+ * delete while the project overlay owns it.
  * `containsCurrent` arrives on the node (derivation fact, no renderer scan).
  * @param props.group - derived group node.
  * @param props.containsCurrentDescendant - highlight an ancestor even when its subtree is collapsed.
  * @param props.onToggle - expand/collapse the group.
  * @param props.onCreate - start a frontend Session inside this Workspace.
+ * @param props.actions - the group's own verbs; absent for the ungrouped bucket.
  * @param props.drag - optional workspace-row drag wiring.
  * @param props.home - host account home for POSIX hover-path abbreviation.
  * @param props.t - the browser root's locale seat.
@@ -222,8 +244,13 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
   containsCurrentDescendant?: boolean
   onToggle: () => void
   onCreate: () => void
-  /** Real-Workspace actions; absent for the ungrouped bucket (no menu shown). */
-  actions?: { rename: () => void; delete: () => void } | undefined
+  /** Real-Workspace verbs; absent for the ungrouped bucket (no menu shown). */
+  actions?: {
+    rename: () => void
+    /** Open the folder-management dialog; present only while the project overlay owns this group. */
+    manageRoots?: (() => void) | undefined
+    delete: () => void
+  } | undefined
   /** Present only for real Workspace rows in the grouped view. */
   drag?: WorkspaceRowDragProps | undefined
   /** Host account home; POSIX home-rooted hover paths display as `~`. */
@@ -233,11 +260,21 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
   const row = group
   // The ungrouped bucket has no workspace title: its label is dictionary copy.
   const label = row.workspaceId === undefined ? t('group.ungrouped') : row.label
+  const project = group.project
   const active = containsCurrentDescendant || (group.expanded && group.containsCurrent)
   const [menuOpen, setMenuOpen] = useState(false)
+  const manageRoots = actions?.manageRoots
   const workspaceMenuItems = [
-    { id: 'rename', label: t('rename'), icon: <IconEditOutlineRegular /> },
-    { id: 'delete', label: t('delete.workspace'), icon: <IconTrashOutlineRegular />, danger: true },
+    { id: 'rename', label: project === undefined ? t('rename') : t('project.rename'), icon: <IconEditOutlineRegular /> },
+    ...(project === undefined || manageRoots === undefined
+      ? []
+      : [{ id: 'folders', label: t('project.manageFolders'), icon: <IconFolderCloseRegular /> }]),
+    {
+      id: 'delete',
+      label: project === undefined ? t('delete.workspace') : t('project.delete'),
+      icon: <IconTrashOutlineRegular />,
+      danger: true,
+    },
   ]
   const ownRow = (
     <div
@@ -265,6 +302,11 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
       <span className={css.projectText}>
         <span className={css.title}>{label}</span>
       </span>
+      {project !== undefined && (
+        <span className={css.folderCount}>
+          {t(project.roots.length === 1 ? 'project.folders.one' : 'project.folders.other', { n: project.roots.length })}
+        </span>
+      )}
       <span className={css.rowActions}>
         {actions !== undefined && (
           <Menu
@@ -275,10 +317,14 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
               setMenuOpen(false)
               // Unknown ids leave before the dispatch: a future menu row must
               // not inherit the destructive branch as an else fallback.
-              /* v8 ignore next -- Menu can emit only the rename and delete rows supplied above. */
-              if (id !== 'rename' && id !== 'delete') return
+              /* v8 ignore next -- Menu can emit only the rows supplied above. */
+              if (id !== 'rename' && id !== 'folders' && id !== 'delete') return
               if (id === 'rename') actions.rename()
-              else actions.delete()
+              else if (id === 'delete') actions.delete()
+              else {
+                /* v8 ignore next -- narrowing guard: the folders row renders only with the verb supplied. */
+                if (manageRoots !== undefined) manageRoots()
+              }
             }}
             portal
             closeOnPointerLeave
@@ -317,6 +363,8 @@ export function ProjectRowItem({ group, containsCurrentDescendant = false, onTog
         label={row.label}
         cwd={row.cwd === undefined ? undefined : abbreviateHomePath(row.cwd, home)}
         createdAt={row.createdAt}
+        project={project}
+        home={home}
         t={t}
       />}
       openDelayMs={800}

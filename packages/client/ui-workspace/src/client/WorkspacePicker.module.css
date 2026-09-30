@@ -18,3 +18,26 @@
 .menuStatus {
   color: var(--dsw-alias-label-secondary);
 }
+
+/* Project rows in the picker list: the project name leads and its folder
+ * count trails as small text on the same line. */
+.projectLabel {
+  display: flex;
+  align-items: baseline;
+  gap: 6px;
+  min-width: 0;
+}
+
+.projectLabelName {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.projectLabelMeta {
+  flex: none;
+  font-size: 11px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}

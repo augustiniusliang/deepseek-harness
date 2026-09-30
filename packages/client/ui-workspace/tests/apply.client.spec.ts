@@ -24,6 +24,7 @@ import { PinSessionMenuItem, PinSessionRowButton } from '../src/client/session-a
 import { RenameSessionMenuItem, SessionRenameDialog } from '../src/client/session-actions/RenameSession.tsx'
 import { RowActionToast } from '../src/client/session-actions/RowActionToast.tsx'
 import { WorkspacePicker } from '../src/client/WorkspacePicker.tsx'
+import { PROJECTS_ROUTE } from '../src/client/projects.ts'
 import { FLAT_SESSION_ORDER_KEY } from '../src/client/stores.ts'
 import { UNGROUPED_KEY } from '../src/client/tree.ts'
 import { apply as hostApply } from '../src/index.ts'
@@ -589,6 +590,60 @@ describe('ui-workspace apply', () => {
     const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
     await expect(browser.searchSessions('needle', new AbortController().signal))
       .rejects.toThrow('index unavailable')
+  })
+
+  it('shares one project overlay and routes its writes to the project endpoint', async () => {
+    const b = await bench()
+    const calls: { url: string; method: string; body: unknown }[] = []
+    vi.stubGlobal('fetch', async (url: string, init?: { method?: string; body?: string }) => {
+      calls.push({
+        url,
+        method: init?.method ?? 'GET',
+        body: init?.body === undefined ? undefined : JSON.parse(init.body) as unknown,
+      })
+      return {
+        ok: true,
+        status: 200,
+        json: async () => (init?.method === 'POST'
+          ? { ok: true, project: { id: 'p1', name: 'Alpha', roots: [{ path: '/w/alpha' }], createdAt: 1 } }
+          : { projects: [], attachments: {} }),
+      }
+    })
+    onTestFinished(() => { vi.unstubAllGlobals() })
+    declare(b.slots, 'sidebar.workspaces', 'conversation.hero.workspace')
+    await b.ctx.plugin({ inject: [...inject], apply }).await()
+    const browser = faceOf(b.slots.entries('sidebar.workspaces')[0]!) as WorkspaceBrowserInjected
+    const picker = faceOf(b.slots.entries('conversation.hero.workspace')[0]!) as WorkspacePickerInjected
+    // One source serves both surfaces, and the boot read has settled empty.
+    expect(browser.hooks.projects).toBe(picker.hooks.projects)
+    await vi.waitFor(() => {
+      expect(browser.hooks.projects.getSnapshot()).toEqual({ projects: [], attachments: {} })
+    })
+    expect(calls[0]).toEqual({ url: PROJECTS_ROUTE, method: 'GET', body: undefined })
+
+    const project = await browser.createProject({ name: 'Alpha', roots: [{ path: '/w/alpha' }] })
+    expect(project.id).toBe('p1')
+    expect(calls[1]).toEqual({
+      url: PROJECTS_ROUTE,
+      method: 'POST',
+      body: { action: 'create', name: 'Alpha', roots: [{ path: '/w/alpha' }] },
+    })
+    // The write reconciles with a read.
+    expect(calls[2]).toEqual({ url: PROJECTS_ROUTE, method: 'GET', body: undefined })
+    await picker.updateProject({ id: 'p1', name: 'Beta' })
+    expect(calls.filter(call => call.method === 'POST')[1]).toEqual({
+      url: PROJECTS_ROUTE,
+      method: 'POST',
+      body: { action: 'update', id: 'p1', name: 'Beta' },
+    })
+    await browser.deleteProject('p1')
+    expect(calls.filter(call => call.method === 'POST')[2]).toEqual({
+      url: PROJECTS_ROUTE,
+      method: 'POST',
+      body: { action: 'delete', id: 'p1' },
+    })
+    await browser.refreshProjects()
+    expect(calls.at(-1)).toEqual({ url: PROJECTS_ROUTE, method: 'GET', body: undefined })
   })
 
   it('unregisters every entry on teardown', async () => {

@@ -1,13 +1,16 @@
 /**
  * The workspace/session browsing region filling the sidebar shell's
- * `sidebar.workspaces` hole: section header (title + view options + add
- * workspace), search, the grouped tree or flat list, and the workspace
- * dialogs. Wide state renders the full browser; rail state renders the two
- * region icons (search / add workspace) as 36px controls on the shell's shared
+ * `sidebar.workspaces` hole: section header (title + view options + add),
+ * search, the grouped tree or flat list, and the workspace/project dialogs.
+ * Wide state renders the full browser; rail state renders the two
+ * region icons (search / add) as 36px controls on the shell's shared
  * rail entry path, each requesting expansion through the owner share. Adding
- * is the header button's one action, so it raises the directory flow with no
- * menu in between; the flow and its error dialog live in WorkspacePicker
- * (same package — direct composition, no slot between them). A Session row's
+ * is the header button's one action, so it raises the pick/add flow with no
+ * menu in between; the flow and its dialogs live in WorkspacePicker and
+ * ProjectDialogs (same package — direct composition, no slot between them).
+ * A Workspace the project overlay owns presents as that project in its group
+ * row and hover card, and its row menu carries the project verbs instead of
+ * the Workspace ones. A Session row's
  * "..." menu and hover buttons are the `sidebar.workspaces.session.menu.item`
  * and `sidebar.workspaces.session.row.action` lists rendered through this
  * entry's `renderSlot`; the actions in them, this package's own included,
@@ -31,6 +34,8 @@ import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { PropsRenderSlots } from '@deepseek-ai/dsh-client-ui-slots'
 import type { WorkspaceBrowserProps } from '../contract/slots.ts'
+import type { Project, ProjectOverlay } from '../projects.ts'
+import { ProjectFoldersDialog } from '../ProjectDialogs.tsx'
 import type { ArchivedFilter, GroupNode, SessionNode, SessionOrderBy, SessionRowState } from '../tree.ts'
 import {
   deriveFlat, deriveGroups, deriveSearchResults, orderByRecency, owningGroupKey, owningParentFolder,
@@ -233,6 +238,8 @@ type SessionTreeProps = Pick<
   workspaces: readonly WorkspaceView[]
   /** Browser-projected order for Sessions outside every Workspace. */
   ungroupedSessionIds: readonly SessionId[]
+  /** Project overlay owning some of these Workspaces; absent keeps every group a plain Workspace. */
+  projects: ProjectOverlay | undefined
   /** Whether the current Workspace stream has a complete Host baseline. */
   workspaceReady: boolean
   /** Grouping, ordering, and filter changes replace the view without row motion. */
@@ -253,6 +260,12 @@ type SessionTreeProps = Pick<
   onRenameRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
   /** Open the browser-owned delete-confirmation dialog for a real Workspace group. */
   onDeleteRequest: (workspaceId: WorkspaceId, currentTitle: string) => void
+  /** Open the browser-owned rename dialog for a project-owned group. */
+  onProjectRenameRequest: (project: Project) => void
+  /** Open the folder-management dialog for a project-owned group. */
+  onProjectFoldersRequest: (project: Project) => void
+  /** Open the browser-owned delete-confirmation dialog for a project-owned group. */
+  onProjectDeleteRequest: (project: Project) => void
   /** Open the rename dialog from a row title double-click. */
   onSessionRenameRequest: (sessionId: SessionNode['id'], currentTitle: string) => void
   /** One Session chosen from search that must be exposed and scrolled into view. */
@@ -283,6 +296,8 @@ function SessionTree({
   rowState, onLeaveArchivedOnly,
   workspaceReady, animationResetKey, usePanelInfo,
   onRenameRequest, onDeleteRequest, onSessionRenameRequest,
+  onProjectRenameRequest, onProjectFoldersRequest, onProjectDeleteRequest,
+  projects,
   renderSlot,
   insertWorkspaceBefore,
   nestWorkspaces, groupExpansion, setGroupExpanded,
@@ -337,8 +352,8 @@ function SessionTree({
     () => deriveGroups(list, workspaces, rowState, statuses, {
       expandedGroups,
       ungroupedOrder: ungroupedSessionIds,
-    }),
-    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds],
+    }, projects),
+    [list, workspaces, rowState, statuses, expandedGroups, ungroupedSessionIds, projects],
   )
   useEffect(() => {
     for (let key = revealGroup; key !== undefined; key = parents.get(key)) {
@@ -414,6 +429,7 @@ function SessionTree({
   const rowKeys: string[] = groups.length === 0 ? ['empty'] : []
   const renderGroup = (group: GroupNode, depth: number): ReactNode => {
     const workspaceId = group.workspaceId
+    const project = group.project
     const children = childrenByParent.get(group.key) ?? []
     const compatibleDrag = workspaceDrag !== null && parents.get(workspaceDrag.workspaceId) === parents.get(group.key)
     const collapsed = collapsedSessionRows(group.sessions)
@@ -453,6 +469,21 @@ function SessionTree({
       : (half: 'before' | 'after') => {
         commitWorkspaceDrag(workspaceDrag, { id: workspaceId, half })
       }
+    // The row's verbs follow the group's own kind: a project-owned group
+    // renames and deletes the project grouping and manages its folders, while
+    // a plain Workspace renames through the Host registry.
+    const rowActions = workspaceId === undefined
+      ? undefined
+      : project === undefined
+        ? {
+          rename: () => { onRenameRequest(workspaceId, group.label) },
+          delete: () => { onDeleteRequest(workspaceId, group.label) },
+        }
+        : {
+          rename: () => { onProjectRenameRequest(project) },
+          manageRoots: () => { onProjectFoldersRequest(project) },
+          delete: () => { onProjectDeleteRequest(project) },
+        }
     return (
     // Group section: header, descendant Workspaces, and own Session rows. The
     // inter-group breathing room is the section's own margin
@@ -512,18 +543,7 @@ function SessionTree({
             }
           }}
           drag={workspaceDragProps}
-          actions={group.workspaceId === undefined
-            ? undefined
-            : {
-              rename: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onRenameRequest(group.workspaceId, group.label)
-              },
-              delete: () => {
-              /* v8 ignore next -- narrowing guard: the actions object exists only for real-workspace groups. */
-                if (group.workspaceId !== undefined) onDeleteRequest(group.workspaceId, group.label)
-              },
-            }}
+          actions={rowActions}
         />
         {childRows.length > 0 && (
           <div role="group">
@@ -851,9 +871,14 @@ export function WorkspaceBrowser({
   insertWorkspaceBefore,
   unarchiveSession,
   createWorkspace,
+  createProject,
+  updateProject,
+  deleteProject,
+  refreshProjects,
   searchSessions,
   searchResultLimit,
   useDirectoryFlow,
+  useProjects,
   useHostInfo,
   useShortcuts,
   useWorkspaceShortcuts,
@@ -872,6 +897,12 @@ export function WorkspaceBrowser({
   const shortcutState = useWorkspaceShortcuts(state => state)
   // Ordering remains live while the rail or search replaces the list body.
   const list = useSessions(state => state)
+  // The project overlay; absent keeps every group a plain Workspace and the
+  // add gesture the one route it has without projects.
+  const projects = useProjects(state => state)
+  // The add gesture's name follows the deployment: with projects it creates
+  // one, without it registers a picked directory as a Workspace.
+  const addLabel = projects === undefined ? t('workspace.add') : t('project.create.title')
   const storedWorkspaces = useWorkspaces(state => state.items)
   // The resolved name, not `t`, is the memo dependency: the bound seat keeps
   // its identity across a language switch.
@@ -1128,21 +1159,31 @@ export function WorkspaceBrowser({
   }, [normalizedQuery, searchSessions])
 
   // Rename dialog (browser-owned so it outlives row unmounts during collapse).
-  // The stored title decides whether confirming is a real rename; the draft is
-  // seeded with the label on screen. They differ for a Workspace still
-  // carrying its automatic title, so confirming the prefill pins that name.
-  const [renameTarget, setRenameTarget] = useState<{ workspaceId: WorkspaceId; storedTitle: string } | null>(null)
+  // A project group renames the project — its display name is the authority —
+  // while a plain Workspace renames through the Host registry. The stored
+  // title decides whether confirming is a real rename; the draft is seeded
+  // with the label on screen, which for an automatically titled Workspace
+  // differs from the stored one, so confirming the prefill pins that name.
+  const [renameTarget, setRenameTarget] = useState<
+    | { kind: 'workspace'; workspaceId: WorkspaceId; storedTitle: string }
+    | { kind: 'project'; id: string; name: string }
+    | null
+  >(null)
   const [renameDraft, setRenameDraft] = useState('')
   const [renaming, setRenaming] = useState(false)
   const [renameError, setRenameError] = useState<string | null>(null)
   const renameTrimmed = renameDraft.trim()
   // Self is excluded by identity, not by title: the draft is seeded with the
   // localized label, which for an automatically titled Workspace equals its
-  // own displayed title without being a conflict with itself.
-  const renameDuplicate = renameTarget !== null && renameTrimmed !== ''
+  // own displayed title without being a conflict with itself. Project names
+  // are display-only and carry no uniqueness rule, so they never conflict.
+  const renameDuplicate = renameTarget?.kind === 'workspace' && renameTrimmed !== ''
     && workspaces.some(w => w.workspaceId !== renameTarget.workspaceId && w.title === renameTrimmed)
+  const renameStored = renameTarget === null
+    ? ''
+    : renameTarget.kind === 'workspace' ? renameTarget.storedTitle : renameTarget.name
   const renameBlocked = renaming || renameTrimmed === ''
-    || renameTarget === null || renameTrimmed === renameTarget.storedTitle || renameDuplicate
+    || renameTarget === null || renameTrimmed === renameStored || renameDuplicate
   const closeRename = () => {
     if (renaming) return
     setRenameTarget(null)
@@ -1152,7 +1193,11 @@ export function WorkspaceBrowser({
     if (renameBlocked) return
     setRenaming(true)
     setRenameError(null)
-    renameWorkspace(renameTarget.workspaceId, renameTrimmed).then(() => {
+    const target = renameTarget
+    const request = target.kind === 'workspace'
+      ? renameWorkspace(target.workspaceId, renameTrimmed)
+      : updateProject({ id: target.id, name: renameTrimmed })
+    request.then(() => {
       setRenaming(false)
       setRenameTarget(null)
     }).catch((reason: unknown) => {
@@ -1169,9 +1214,19 @@ export function WorkspaceBrowser({
     })
   }
 
+  // Folder management for a project-owned group; the dialog seeds its extra
+  // roots from the project it opened on.
+  const [foldersTarget, setFoldersTarget] = useState<Project | null>(null)
+
   // Delete dialog is separate from the row so a successful removal can
   // unmount that row without tearing down the in-flight confirmation state.
-  const [deleteTarget, setDeleteTarget] = useState<{ workspaceId: WorkspaceId; title: string } | null>(null)
+  // A project delete removes the grouping only, so it settles with its own
+  // write instead of waiting for the Workspace projection.
+  const [deleteTarget, setDeleteTarget] = useState<
+    | { kind: 'workspace'; workspaceId: WorkspaceId; title: string }
+    | { kind: 'project'; id: string; name: string }
+    | null
+  >(null)
   const [deleting, setDeleting] = useState(false)
   const [deleteCommittedId, setDeleteCommittedId] = useState<WorkspaceId | null>(null)
   const [deleteError, setDeleteError] = useState<string | null>(null)
@@ -1193,6 +1248,16 @@ export function WorkspaceBrowser({
     setDeleting(true)
     setDeleteCommittedId(null)
     setDeleteError(null)
+    if (deleteTarget.kind === 'project') {
+      deleteProject(deleteTarget.id).then(() => {
+        setDeleting(false)
+        setDeleteTarget(null)
+      }).catch((reason: unknown) => {
+        setDeleting(false)
+        setDeleteError(reason instanceof Error ? reason.message : String(reason))
+      })
+      return
+    }
     deleteWorkspace(deleteTarget.workspaceId).then(() => {
       // Keep the confirmation pending until this component has rendered the
       // committed list projection without the deleted id. Closing earlier
@@ -1203,6 +1268,13 @@ export function WorkspaceBrowser({
       setDeleteError(reason instanceof Error ? reason.message : String(reason))
     })
   }
+
+  /** Dialog titles and verb copy for whichever kind of group is targeted. */
+  const deleteDescription = deleteTarget === null
+    ? undefined
+    : deleteTarget.kind === 'workspace'
+      ? t('delete.desc', { name: deleteTarget.title })
+      : t('project.delete.desc', { name: deleteTarget.name })
 
   return (
     <div className={clsx(css.root, !wide && css.rail)}>
@@ -1285,12 +1357,12 @@ export function WorkspaceBrowser({
               picking affordance has nothing to offer here: the region hides the
               button rather than leaving a dead one in the header. */}
           {directoryFlowAvailable && (
-            <Tooltip label={t('workspace.add')} shortcutKeys={addShortcut?.keys} side="bottom" delayMs={500}>
+            <Tooltip label={addLabel} shortcutKeys={addShortcut?.keys} side="bottom" delayMs={500}>
               <button
                 ref={wsPlusRef}
                 type="button"
                 className={css.iconButton}
-                aria-label={t('workspace.add')}
+                aria-label={addLabel}
                 aria-keyshortcuts={addShortcut?.aria}
                 onClick={() => {
                   requestAddWorkspace()
@@ -1310,6 +1382,7 @@ export function WorkspaceBrowser({
           createWorkspace={createWorkspace}
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
+          project={{ useProjects, createProject, refreshProjects }}
           addOnly
           onBusyChange={setDirectoryBusy}
           side="right"
@@ -1388,6 +1461,7 @@ export function WorkspaceBrowser({
                 renderSlot={renderSlot}
                 workspaces={orderedWorkspaces}
                 ungroupedSessionIds={orderedUngroupedSessionIds}
+                projects={projects}
                 workspaceReady={workspaceReady}
                 nestWorkspaces={groupBy === 'workspace-tree'}
                 animationResetKey={`${groupBy}/${orderBy}/${archivedFilter}`}
@@ -1405,6 +1479,7 @@ export function WorkspaceBrowser({
                 t={t}
                 onRenameRequest={(workspaceId, displayTitle) => {
                   setRenameTarget({
+                    kind: 'workspace',
                     workspaceId,
                     storedTitle: storedWorkspaces.find(w => w.workspaceId === workspaceId)?.title ?? displayTitle,
                   })
@@ -1412,18 +1487,39 @@ export function WorkspaceBrowser({
                   setRenameError(null)
                 }}
                 onDeleteRequest={(workspaceId, title) => {
-                  setDeleteTarget({ workspaceId, title })
+                  setDeleteTarget({ kind: 'workspace', workspaceId, title })
+                  setDeleteError(null)
+                }}
+                onProjectRenameRequest={(project) => {
+                  setRenameTarget({ kind: 'project', id: project.id, name: project.name })
+                  setRenameDraft(project.name)
+                  setRenameError(null)
+                }}
+                onProjectFoldersRequest={(project) => { setFoldersTarget(project) }}
+                onProjectDeleteRequest={(project) => {
+                  setDeleteTarget({ kind: 'project', id: project.id, name: project.name })
                   setDeleteError(null)
                 }}
               />
             ))}
       </div>
 
+      {foldersTarget !== null && (
+        <ProjectFoldersDialog
+          t={t}
+          project={foldersTarget}
+          onClose={() => { setFoldersTarget(null) }}
+          updateProject={updateProject}
+          useDirectoryFlow={useDirectoryFlow}
+          renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
+        />
+      )}
+
       <Modal
         open={renameTarget !== null}
         onClose={closeRename}
         closeLabel={t('close')}
-        title={t('rename.workspace.title')}
+        title={renameTarget?.kind === 'project' ? t('project.rename') : t('rename.workspace.title')}
         footer={(
           <>
             <Button variant="outline" disabled={renaming} onClick={closeRename}>{t('cancel')}</Button>
@@ -1434,7 +1530,7 @@ export function WorkspaceBrowser({
         <input
           className={css.renameInput}
           value={renameDraft}
-          aria-label={t('field.workspaceName')}
+          aria-label={renameTarget?.kind === 'project' ? t('project.name') : t('field.workspaceName')}
           data-modal-autofocus
           disabled={renaming}
           onFocus={(e) => { e.target.select() }}
@@ -1458,10 +1554,8 @@ export function WorkspaceBrowser({
         open={deleteTarget !== null}
         onClose={closeDelete}
         closeLabel={t('close')}
-        title={t('delete.workspace')}
-        {...deleteTarget === null
-          ? {}
-          : { description: t('delete.desc', { name: deleteTarget.title }) }}
+        title={deleteTarget?.kind === 'project' ? t('project.delete') : t('delete.workspace')}
+        {...deleteDescription === undefined ? {} : { description: deleteDescription }}
         footer={(
           <>
             <Button variant="outline" disabled={deleting} onClick={closeDelete}>{t('cancel')}</Button>
@@ -1471,12 +1565,16 @@ export function WorkspaceBrowser({
               disabled={deleting}
               onClick={confirmDelete}
             >
-              {t('delete.workspace')}
+              {deleteTarget?.kind === 'project' ? t('project.delete') : t('delete.workspace')}
             </Button>
           </>
         )}
       >
-        {deleting && <div className={css.deleteStatus} role="status">{t('delete.pending')}</div>}
+        {deleting && (
+          <div className={css.deleteStatus} role="status">
+            {deleteTarget?.kind === 'project' ? t('project.delete.pending') : t('delete.pending')}
+          </div>
+        )}
         {deleteError !== null && <div className={css.renameError} role="alert">{deleteError}</div>}
       </Modal>
       {shortcutState.forkError !== null && <Toast key={shortcutState.forkError.seq}

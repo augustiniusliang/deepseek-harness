@@ -11,16 +11,17 @@
  * Both registrations declare a **directory-flow hole** (`single` kind): the
  * slot a composed picker package's client half fills with its
  * picking interaction — a renderless native-chooser driver or an in-app
- * browsing dialog. ui-workspace owns the trigger (the "Add workspace…"
- * entry, present only while the hole is occupied) and the adoption
- * semantics (`createWorkspace({ path })`, the retryable error dialog,
- * Choose again); the occupant owns everything between `open` and the picked path,
- * including creating a new directory to hand back. That occupant-owned
- * creation is why adding a workspace has a single route: an unoccupied hole
- * leaves the surface with no add affordance at all.
- * Two holes exist because the two menu surfaces are independent slot entries
- * and a hole has exactly one declaring entry — they carry the same owner
- * contract and the same occupant.
+ * browsing dialog. ui-workspace owns the trigger (the "Add workspace…" entry
+ * of the picker menu, and each project dialog's "Browse…" control, both
+ * present only while the hole is occupied) and the adoption semantics
+ * (`createWorkspace({ path })` or the requesting field, the retryable error
+ * dialog, Choose again); the occupant owns everything between `open` and the
+ * picked path, including creating a new directory to hand back. That
+ * occupant-owned creation is why adding a workspace has a single route: an
+ * unoccupied hole leaves those surfaces with no picking affordance at all.
+ * Two holes exist because the two owner entries are independent slot
+ * registrations and a hole has exactly one declaring entry — they carry the
+ * same owner contract and the same occupant.
  *
  * WorkspaceBrowser also declares the two **Session row action lists**: every
  * row of a Session's "..." menu is an entry of
@@ -51,6 +52,9 @@ import type { RemoteHostFacts } from '@deepseek-ai/dsh-api-remotes/client'
 import type { SessionActivity, WorkspaceId, WorkspaceView } from '@deepseek-ai/dsh-api-workspace-controller/client'
 import type { SessionId } from '@deepseek-ai/dsh-session/types'
 import type { ShortcutCatalogEntry } from '@deepseek-ai/dsh-client-shortcuts/client'
+import type {
+  Project, ProjectCreateInput, ProjectOverlay, ProjectUpdateInput,
+} from '../projects.ts'
 import type { WorkspaceShortcutState } from '../shortcuts.ts'
 import type { createWorkspaceViewStore } from '../stores.ts'
 
@@ -62,9 +66,9 @@ import type { createWorkspaceViewStore } from '../stores.ts'
 export interface DirectoryFlowOwnerProps {
   /** True while a picking interaction is requested; flipping back to false withdraws the request. */
   open: boolean
-  /** True while the owner adopts a picked path (`createWorkspace` in flight); occupants disable their commit affordances. */
+  /** True while the owner adopts a picked path (a Workspace creation in flight); occupants disable their commit affordances. */
   busy: boolean
-  /** The operator picked a directory (absolute host path); the owner adopts it. */
+  /** The operator picked a directory (absolute host path); the owner adopts it — as a Workspace, or as the requesting field. */
   onPicked: (path: string) => void
   /** The operator dismissed the interaction; the owner just closes the flow. */
   onCancel: () => void
@@ -208,12 +212,34 @@ export type DirectoryPickingInjected = {
 export type DirectoryPickingHooks = PropsHooks<DirectoryPickingInjected['hooks']>
 
 /**
+ * Project overlay share of both surfaces: the overlay every grouping surface
+ * derives project-owned groups from, plus the writes the project dialogs
+ * drive. A surface reads availability from the overlay itself — an absent
+ * overlay (no project endpoint behind this deployment) keeps the plain
+ * Workspace presentation and its one-route directory picking.
+ */
+export type ProjectOverlayInjected = {
+  hooks: {
+    /** Published project overlay; absent until the endpoint has answered once. */
+    projects: HostObservable<ProjectOverlay | undefined>
+  }
+  /** Create a project after its primary root exists as a Host Workspace. */
+  createProject: (input: ProjectCreateInput) => Promise<Project>
+  /** Patch a project's name and/or roots. */
+  updateProject: (input: ProjectUpdateInput) => Promise<Project>
+  /** Delete the project grouping; its folders, Sessions, and logs stay. */
+  deleteProject: (id: string) => Promise<void>
+  /** Read the overlay again (a dialog opening is the usual trigger); a failed read keeps the last answer. */
+  refreshProjects: () => Promise<void>
+}
+
+/**
  * Browser-private injected share (arrives via the register inject factory).
  * Data reads use the global framework hooks; these are the Host actions the
  * browsing region drives.
  */
 export type WorkspaceBrowserInjected = {
-  hooks: DirectoryPickingInjected['hooks'] & {
+  hooks: DirectoryPickingInjected['hooks'] & ProjectOverlayInjected['hooks'] & {
     /**
      * Fixed Host facts, reached through a hook rather than injected as values:
      * the renderer memoizes an entry's inject result for the registration's
@@ -269,7 +295,7 @@ export type WorkspaceBrowserInjected = {
   unarchiveSession: (sessionId: SessionId) => Promise<void>
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
-}
+} & Omit<ProjectOverlayInjected, 'hooks'>
 
 /** The browser's declared viewing store handle, shared with the row actions that write view state. */
 export type WorkspaceViewStoreHandle = ReturnType<typeof createWorkspaceViewStore>
@@ -470,7 +496,7 @@ export type WorkspaceBrowserProps =
  * callback; this callback creates only the real Host Workspace. A type alias
  * supplies the implicit index signature required by the registry.
  */
-export type WorkspacePickerInjected = DirectoryPickingInjected & {
+export type WorkspacePickerInjected = DirectoryPickingInjected & ProjectOverlayInjected & {
   /** Adopt a picked host directory as a real Workspace before targeting a Session. */
   createWorkspace: (input: { path: string }) => Promise<WorkspaceView>
 }

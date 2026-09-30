@@ -11,6 +11,7 @@ import { bindSnapshotSelector, makeTranslate } from '@deepseek-ai/dsh-client-tes
 import { zh as commonZh } from '@deepseek-ai/dsh-client-locale/src/locales/zh.ts'
 import type { SessionStatusSnapshot } from '@deepseek-ai/dsh-client-ui-session/client'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from '../src/client/contract/slots.ts'
+import type { Project, ProjectCreateInput, ProjectOverlay, ProjectRoots, ProjectUpdateInput } from '../src/client/projects.ts'
 import { WorkspacePicker } from '../src/client/WorkspacePicker.tsx'
 import { zh } from '../src/client/locales.ts'
 
@@ -41,6 +42,12 @@ const noPendingInteraction: SessionStatusSnapshot = new Map()
 const workspaceState = (items: readonly WorkspaceView[]): WorkspaceSnapshot => ({
   items, archivedSessionIds: [], pinnedSessionIds: [], state: 'idle', phase: 'ready', error: null,
 })
+const project = (id: string, name: string, roots: ProjectRoots = [{ path: `/w/${id}` }]): Project => ({
+  id, name, roots, createdAt: 0,
+})
+/** Project overlay naming one Workspace as a two-folder project. */
+const projectOverlay = (projects: readonly Project[], attachments: Record<string, string> = {}): ProjectOverlay =>
+  ({ projects, attachments })
 function anchor(): { current: HTMLElement } {
   const element = document.createElement('button')
   element.getBoundingClientRect = () => ({
@@ -88,11 +95,13 @@ function mount(
   items: readonly WorkspaceView[] = [workspace('alpha', 'Alpha')],
   createWorkspace = vi.fn(),
   occupancy = occupancySource(),
+  projects?: ProjectOverlay,
 ) {
   const onPick = vi.fn()
   const onClose = vi.fn()
   const anchorRef = anchor()
   const { probe, renderSlot } = flowProbe()
+  const createProject = vi.fn(async (input: ProjectCreateInput) => project('p-new', input.name, input.roots))
   const renderPicker = (nextItems: readonly WorkspaceView[]) => (
     <WorkspacePicker
       open
@@ -102,9 +111,14 @@ function mount(
       useSessionRetainInfo={() => undefined}
       usePanelInfo={usePanelInfo} useResource={useResource}
       useWorkspaces={hook(workspaceState(nextItems))}
+      useProjects={hook(projects)}
       onPick={onPick}
       onClose={onClose}
       createWorkspace={createWorkspace}
+      createProject={createProject}
+      updateProject={vi.fn(async (input: ProjectUpdateInput) => project(input.id, input.name ?? input.id, input.roots))}
+      deleteProject={vi.fn(async () => {})}
+      refreshProjects={vi.fn(async () => {})}
       useDirectoryFlow={occupancy.useDirectoryFlow}
       renderSlot={renderSlot}
       t={t}
@@ -114,7 +128,7 @@ function mount(
     renderPicker(items),
   )
   return {
-    view, onPick, onClose, createWorkspace, probe, occupancy,
+    view, onPick, onClose, createWorkspace, createProject, probe, occupancy, projects,
     rerenderItems: (nextItems: readonly WorkspaceView[]) => { view.rerender(renderPicker(nextItems)) },
   }
 }
@@ -224,7 +238,9 @@ describe('WorkspacePicker', () => {
         useSessionStatus={hook(noPendingInteraction)}
         useSessionRetainInfo={() => undefined}
         usePanelInfo={usePanelInfo} useResource={useResource}
+        useProjects={hook<ProjectOverlay | undefined>(undefined)}
         onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
+        createProject={vi.fn()} updateProject={vi.fn()} deleteProject={vi.fn()} refreshProjects={vi.fn()}
         useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t}
       />,
     )
@@ -242,7 +258,9 @@ describe('WorkspacePicker', () => {
         useSessionStatus={hook(noPendingInteraction)}
         useSessionRetainInfo={() => undefined}
         usePanelInfo={usePanelInfo} useResource={useResource}
+        useProjects={hook<ProjectOverlay | undefined>(undefined)}
         onPick={vi.fn()} onClose={vi.fn()} createWorkspace={vi.fn()}
+        createProject={vi.fn()} updateProject={vi.fn()} deleteProject={vi.fn()} refreshProjects={vi.fn()}
         useDirectoryFlow={occupancySource().useDirectoryFlow} renderSlot={renderSlot} t={t}
       />,
     )
@@ -319,5 +337,55 @@ describe('WorkspacePicker', () => {
     expect(b.probe.owner!.open).toBe(false)
     expect(screen.getByRole<HTMLButtonElement>('menuitem', { name: 'Alpha' }).disabled).toBe(false)
     expect(screen.queryByRole('menuitem', { name: '添加工作区…' })).toBeNull()
+  })
+
+  it('labels a project-owned Workspace by its project name and folder count', () => {
+    mount(
+      [workspace('alpha', 'Alpha'), workspace('beta', 'Beta')],
+      vi.fn(),
+      occupancySource(),
+      projectOverlay([project('p1', '科研项目', [{ path: '/projects/alpha' }, { path: '/projects/data' }])]),
+    )
+    const entry = screen.getByRole('menuitem', { name: /科研项目/ })
+    expect(entry.textContent).toBe('科研项目2 个文件夹')
+    // The plain Workspace keeps its own title.
+    expect(screen.getByRole('menuitem', { name: 'Beta' })).toBeTruthy()
+    expect(screen.getByRole('menuitem', { name: '新建项目…' })).toBeTruthy()
+    expect(screen.queryByRole('menuitem', { name: '添加工作区…' })).toBeNull()
+  })
+
+  it('creates a project from the add entry instead of opening the directory flow', () => {
+    const b = mount(
+      [workspace('alpha', 'Alpha')],
+      vi.fn(),
+      occupancySource(),
+      projectOverlay([]),
+    )
+    fireEvent.click(screen.getByRole('menuitem', { name: '新建项目…' }))
+    expect(b.onClose).toHaveBeenCalled()
+    expect(screen.queryByTestId('directory-flow')).toBeNull()
+    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeTruthy()
+    // A cancelled creation leaves the picker where it was.
+    fireEvent.click(screen.getByRole('button', { name: '取消' }))
+    expect(screen.queryByRole('dialog', { name: '新建项目' })).toBeNull()
+    expect(b.onPick).not.toHaveBeenCalled()
+  })
+
+  it('raises the project dialog straight from the anchor gesture when adding is the only entry', async () => {
+    const adopted = { ...workspace('adopted'), path: '/w/gamma' }
+    const b = mount([], vi.fn(async () => adopted), occupancySource(), projectOverlay([]))
+    expect(screen.queryByRole('menu')).toBeNull()
+    expect(screen.getByRole('dialog', { name: '新建项目' })).toBeTruthy()
+    fireEvent.change(screen.getByLabelText('主根'), { target: { value: '/w/gamma' } })
+    await act(async () => { fireEvent.click(screen.getByRole('button', { name: '创建项目' })) })
+    expect(b.createWorkspace).toHaveBeenCalledWith({ path: '/w/gamma' })
+    expect(b.createProject).toHaveBeenCalledWith({ name: '', roots: [{ path: '/w/gamma' }] })
+    await waitFor(() => {
+      expect(b.onPick).toHaveBeenCalledWith(adopted.workspaceId)
+    })
+    // The dialog's own dismissal is the owner's: this stub owner keeps `open`
+    // raised, so the one-shot gesture re-raises the interaction (the real
+    // owners drop `open` through the same onClose the gesture consumed).
+    expect(b.onClose).toHaveBeenCalled()
   })
 })

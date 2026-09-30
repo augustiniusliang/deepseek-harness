@@ -162,6 +162,16 @@
   gap: 2px;
 }
 
+/* Folder count of a project-owned group: small tertiary text between the title
+   cell and the hover-revealed actions. */
+.folderCount {
+  flex: none;
+  margin-inline-start: 6px;
+  font-size: 10px;
+  line-height: 16px;
+  color: var(--dsw-alias-label-tertiary);
+}
+
 .title {
   min-width: 0;
   overflow: hidden;
@@ -367,6 +377,26 @@
   line-height: 16px;
   color: #CFD3D6;
   word-break: break-all;
+}
+
+/* Project hover card: every root of the project, the primary root first. */
+.hoverRoots {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.hoverRoot {
+  display: flex;
+  align-items: baseline;
+  gap: 8px;
+}
+
+.hoverRootTag {
+  flex: none;
+  font-size: 10px;
+  line-height: 16px;
+  color: #ADB2B8;
 }
 
 .hoverTime {

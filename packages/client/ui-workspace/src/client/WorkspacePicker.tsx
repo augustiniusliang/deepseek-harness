@@ -1,12 +1,16 @@
 /**
  * Workspace pick/add flow. WorkspacePickFlow is the reusable core (menu +
- * path error dialog) consumed directly by WorkspaceBrowser (same package) and
- * wrapped by WorkspacePicker for the conversation empty-state slot
- * registration. Directory picking itself lives in the composed flow package's
- * slot occupant (see the contract module doc): this core only opens the flow,
- * adopts the picked path, and owns the error surface. Adding a workspace has
- * exactly one route — pick a host directory, new or existing — because the
- * occupant's own create-folder affordance already covers creating one.
+ * path error dialog + project creation) consumed directly by WorkspaceBrowser
+ * (same package) and wrapped by WorkspacePicker for the conversation
+ * empty-state slot registration. Directory picking itself lives in the
+ * composed flow package's slot occupant (see the contract module doc): this
+ * core only opens the flow, adopts the picked path, and owns the error
+ * surface. A deployment serving the project overlay adds by creating a
+ * project — one dialog names it, picks or types its primary root, and lists
+ * any extra roots — while a deployment without one keeps the single route it
+ * always had: pick a host directory, new or existing, and register it as a
+ * Workspace (the occupant's own create-folder affordance already covers
+ * creating a directory).
  */
 import type { ReactNode, RefObject } from 'react'
 import { useCallback, useEffect, useState } from 'react'
@@ -19,9 +23,22 @@ import type {
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
+import type { Project, ProjectCreateInput, ProjectOverlay } from './projects.ts'
+import { ProjectCreateDialog } from './ProjectDialogs.tsx'
+import { owningProject } from './tree.ts'
 import css from './WorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
+
+/** Project share of one picker surface: the overlay read plus the creation write. */
+export interface PickerProjectShare {
+  /** Selector hook over the published project overlay (framework-bound). */
+  useProjects: SnapshotSelectorHook<ProjectOverlay | undefined>
+  /** Create a project once its primary root exists as a Host Workspace. */
+  createProject: (input: ProjectCreateInput) => Promise<Project>
+  /** Read the overlay again when the creation dialog opens. */
+  refreshProjects: () => Promise<void>
+}
 
 /** Core flow props: the owner supplies popover control and pick semantics. */
 export interface WorkspacePickFlowProps {
@@ -39,6 +56,8 @@ export interface WorkspacePickFlowProps {
   useDirectoryFlow: SnapshotSelectorHook<boolean>
   /** Render this surface's directory-flow hole with the owner conversation (the entry's narrowed renderSlot). */
   renderDirectoryFlow: (owner: DirectoryFlowOwnerProps) => ReactNode
+  /** The project overlay this picker groups by; an absent overlay keeps adding a plain Workspace. */
+  project: PickerProjectShare
   /** A real Workspace was picked or created. */
   onPick: (workspaceId: WorkspaceId) => void
   /** Close the popover (outside click / Escape / post-pick). */
@@ -54,7 +73,7 @@ export interface WorkspacePickFlowProps {
 }
 
 /**
- * Render the pick menu plus the adoption error dialog.
+ * Render the pick menu plus the adoption error dialog and the project creation dialog.
  * @param props - owner-controlled flow props.
  * @returns menu + dialog elements.
  */
@@ -66,6 +85,7 @@ export function WorkspacePickFlow({
   createWorkspace,
   useDirectoryFlow,
   renderDirectoryFlow,
+  project,
   onPick,
   onClose,
   addOnly = false,
@@ -75,6 +95,10 @@ export function WorkspacePickFlow({
 }: WorkspacePickFlowProps) {
   const workspaceSnapshot = useWorkspaces(state => state)
   const workspaces = workspaceSnapshot.items
+  // An answered overlay means this deployment organizes Workspaces as
+  // projects: adding then creates one instead of registering a bare folder.
+  const projects = project.useProjects(state => state)
+  const projectMode = projects !== undefined
   const getAnchorRect = useCallback(
     () => anchorRef?.current?.getBoundingClientRect() ?? null,
     [anchorRef],
@@ -82,12 +106,13 @@ export function WorkspacePickFlow({
   const [errorOpen, setErrorOpen] = useState(false)
   const [modalError, setModalError] = useState<string | null>(null)
   const [flowOpen, setFlowOpen] = useState(false)
+  const [createOpen, setCreateOpen] = useState(false)
   const [pickingFolder, setPickingFolder] = useState(false)
   // One picking interaction at a time: while the flow is open (native chooser
-  // pending, browse dialog up) or its pick is being adopted, every other
-  // menu action stays disabled — a late outcome must not race a concurrent
-  // selection or adoption.
-  const flowBusy = flowOpen || pickingFolder
+  // pending, browse dialog up), the creation dialog is up, or its pick is
+  // being adopted, every other menu action stays disabled — a late outcome
+  // must not race a concurrent selection or adoption.
+  const flowBusy = flowOpen || pickingFolder || createOpen
   useEffect(() => { onBusyChange?.(flowBusy) }, [flowBusy, onBusyChange])
 
   // The occupied hole gates the picking affordance: with no composed flow the
@@ -104,18 +129,38 @@ export function WorkspacePickFlow({
     if (flowOpen && !flowAvailable) setFlowOpen(false)
   }, [flowOpen, flowAvailable])
   const addEntries: MenuEntry[] = flowAvailable
-    ? [{ id: ADD_WORKSPACE, label: t('menu.addWorkspace'), icon: <IconPlusOutlineRegular size={16} />, disabled: flowBusy }]
+    ? [{
+      id: ADD_WORKSPACE,
+      label: projectMode ? t('menu.addProject') : t('menu.addWorkspace'),
+      icon: <IconPlusOutlineRegular size={16} />,
+      disabled: flowBusy,
+    }]
     : []
   // With workspaces listed, the add action pins below the scroll region
   // (divider + always visible); otherwise it IS the menu.
   const pinAdd = !addOnly && workspaces.length > 0
   const items: MenuEntry[] = pinAdd
-    ? workspaces.map(workspace => ({
-      id: workspace.workspaceId,
-      label: workspaceDisplayTitle(workspace.title, t('workspace.defaultName')),
-      icon: <IconFolderCloseRegular size={16} />,
-      disabled: flowBusy,
-    }))
+    ? workspaces.map((workspace) => {
+      const owned = owningProject(workspace, projects)
+      return {
+        id: workspace.workspaceId,
+        // A project-owned Workspace answers to the project's name and says how
+        // many folders the project spans; the Workspace title is the fallback
+        // for every other row.
+        label: owned === undefined
+          ? workspaceDisplayTitle(workspace.title, t('workspace.defaultName'))
+          : (
+            <span className={css.projectLabel}>
+              <span className={css.projectLabelName}>{owned.name}</span>
+              <span className={css.projectLabelMeta}>
+                {t(owned.roots.length === 1 ? 'project.folders.one' : 'project.folders.other', { n: owned.roots.length })}
+              </span>
+            </span>
+          ),
+        icon: <IconFolderCloseRegular size={16} />,
+        disabled: flowBusy,
+      }
+    })
     : addEntries
   // Nothing listed and nothing to add with (a composition that mounts this
   // package without any directory-picker): an empty popover would claim a
@@ -145,21 +190,32 @@ export function WorkspacePickFlow({
     setFlowOpen(true)
   }, [onClose])
 
+  /** Hand the gesture to the creation dialog: the popover withdraws and the dialog owns the interaction. */
+  const openCreateProject = useCallback((): void => {
+    onClose()
+    setErrorOpen(false)
+    setModalError(null)
+    setCreateOpen(true)
+  }, [onClose])
+
   // A menu exists to disambiguate between targets. With no workspaces listed
   // and the add action the only entry left, the anchor gesture IS that action:
   // a one-row popover would cost a click and offer nothing to choose between.
   // The owner's open request is consumed the same way selecting the entry
-  // would consume it (close the popover, raise the flow). An empty list is
-  // only final once the baseline lands — until then the menu stays up with its
-  // loading status instead of jumping into a flow the arriving list would have
-  // made unnecessary; the add-only surface lists nothing and never waits.
+  // would consume it (close the popover, raise the dialog or the flow). An
+  // empty list is only final once the baseline lands — until then the menu
+  // stays up with its loading status instead of jumping into an interaction
+  // the arriving list would have made unnecessary; the add-only surface lists
+  // nothing and never waits.
   const listSettled = addOnly || workspaceSnapshot.phase === 'ready'
   const addIsTheOnlyEntry = !pinAdd && listSettled && addEntries.length === 1
-  // `flowBusy` gates this exactly as it disables the equivalent menu entry: a
-  // pick still being adopted owns the surface until it settles.
+  // `flowBusy` gates this exactly as it disables the equivalent menu entry: an
+  // interaction still owning the surface keeps the gesture parked.
   useEffect(() => {
-    if (open && addIsTheOnlyEntry && !flowBusy) openDirectoryFlow()
-  }, [open, addIsTheOnlyEntry, flowBusy, openDirectoryFlow])
+    if (!open || !addIsTheOnlyEntry || flowBusy) return
+    if (projectMode) openCreateProject()
+    else openDirectoryFlow()
+  }, [open, addIsTheOnlyEntry, flowBusy, projectMode, openCreateProject, openDirectoryFlow])
 
   /** Owner side of the flow conversation: adopt keeps the flow open (busy) until the Host answers. */
   const flowOwner: DirectoryFlowOwnerProps = {
@@ -179,7 +235,8 @@ export function WorkspacePickFlow({
 
   const handleSelect = (id: string): void => {
     if (id === ADD_WORKSPACE) {
-      openDirectoryFlow()
+      if (projectMode) openCreateProject()
+      else openDirectoryFlow()
       return
     }
     onPick(id as WorkspaceId)
@@ -201,6 +258,21 @@ export function WorkspacePickFlow({
       />
       {open && !addIsTheOnlyEntry && !menuIsEmpty && workspaceSnapshot.phase === 'pending' && <div className={css.menuStatus} role="status">{t('picker.loading')}</div>}
       {renderDirectoryFlow(flowOwner)}
+      {createOpen && (
+        <ProjectCreateDialog
+          t={t}
+          onClose={() => { setCreateOpen(false) }}
+          createWorkspace={createWorkspace}
+          createProject={project.createProject}
+          refreshProjects={project.refreshProjects}
+          onCreated={(workspaceId) => {
+            setCreateOpen(false)
+            onPick(workspaceId)
+          }}
+          useDirectoryFlow={useDirectoryFlow}
+          renderDirectoryFlow={renderDirectoryFlow}
+        />
+      )}
       <Modal
         open={errorOpen}
         onClose={closeModal}
@@ -236,6 +308,9 @@ export function WorkspacePicker({
   onClose,
   createWorkspace,
   useDirectoryFlow,
+  useProjects,
+  createProject,
+  refreshProjects,
   renderSlot,
   t,
 }: WorkspacePickerProps) {
@@ -248,6 +323,7 @@ export function WorkspacePicker({
       createWorkspace={createWorkspace}
       useDirectoryFlow={useDirectoryFlow}
       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}
+      project={{ useProjects, createProject, refreshProjects }}
       selectedId={selectedId}
       onPick={onPick}
       onClose={onClose}
