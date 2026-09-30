@@ -2,6 +2,10 @@
 - id: subprocess
   disabled: true
 
+# The fixture substitutes the root provider, so the world facades step aside.
+- id: world-router
+  disabled: true
+
 - id: sandbox
   disabled: true
 

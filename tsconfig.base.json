@@ -558,7 +558,8 @@
       "@deepseek-ai/dsh-workspace/invariant": ["./packages/workspace/workspace/src/invariant.ts"],
       "@deepseek-ai/dsh-workspace-changes": ["./packages/deliverables/workspace-changes/src"],
       "@deepseek-ai/dsh-world": ["./packages/world/world/src"],
-      "@deepseek-ai/dsh-world/invariant": ["./packages/world/world/src/invariant.ts"]
+      "@deepseek-ai/dsh-world/invariant": ["./packages/world/world/src/invariant.ts"],
+      "@deepseek-ai/dsh-world-router": ["./packages/world/world-router/src"]
       // END generated package aliases
     }
   }

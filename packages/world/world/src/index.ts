@@ -86,8 +86,18 @@ export class WorldRegistry extends Service {
   /** Registered non-local backends, in routing-priority order. */
   private readonly backends: WorldBackend[] = []
 
+  /**
+   * The registry's OWN construction context. Service consumers receive a
+   * traceable proxy whose `.ctx` rebinds to the consumer's context; the local
+   * backend must keep reading the providers from the realm the registry was
+   * mounted in (the composition's isolate realm), never from a caller's realm
+   * where `fs` may be the routing facade itself.
+   */
+  private readonly homeCtx: Context
+
   constructor(ctx: Context) {
     super(ctx, 'worlds')
+    this.homeCtx = ctx
 
     ctx.sessionProjections.register({
       key: 'world',
@@ -167,6 +177,16 @@ export class WorldRegistry extends Service {
     return [...this.backends, this.local()].map(backend => ({ ref: backend.ref, displayName: backend.displayName }))
   }
 
+  /**
+   * Look up one world by reference, local included.
+   * @param ref - the world reference.
+   * @returns the backend carrying `ref`, or undefined when no registered world does.
+   */
+  backendOf(ref: WorldRef): WorldBackend | undefined {
+    if (ref === LOCAL_WORLD_REF) return this.local()
+    return this.backends.find(backend => backend.ref === ref)
+  }
+
   /** The first backend claiming a path, or undefined when none does. */
   private claiming(path: string): WorldBackend | undefined {
     return this.backends.find(backend => backend.ownsPath(path))
@@ -178,19 +198,19 @@ export class WorldRegistry extends Service {
    * claims no path and detects no cwd — it exists only as the fallback.
    */
   private local(): WorldBackend {
-    const ctx = this.ctx
+    const home = this.homeCtx
     return {
       ref: LOCAL_WORLD_REF,
       displayName: 'Local',
       ownsPath: () => false,
       detectFromCwd: () => null,
       get fs(): FileSystem {
-        const fs = ctx.get('fs')
+        const fs = home.get('fs')
         if (fs === undefined) throw new Error('worlds: the local world requires a mounted fs provider')
         return fs
       },
       get subprocess(): SubprocessRuntime {
-        const subprocess = ctx.get('subprocess')
+        const subprocess = home.get('subprocess')
         if (subprocess === undefined) throw new Error('worlds: the local world requires a mounted subprocess provider')
         return subprocess
       },

@@ -217,8 +217,32 @@
           maxExportBatchSize: 2048
           exportTimeoutMillis: 1500
 
-    - id: subprocess
-      name: '@deepseek-ai/dsh-subprocess-local'
+    # The local execution world: the real providers and the world registry live
+    # in one isolate realm, so the registry's built-in local backend reads THESE
+    # providers while the root ctx.fs / ctx.subprocess seats belong to the
+    # world-router facades below (path claim > cwd detection > local fallback).
+    # Capability consumers are unchanged; a composition substituting its own
+    # root provider disables the world-router row.
+    - id: world-local
+      name: cordis:group
+      group: true
+      isolate:
+        fs: true
+        subprocess: true
+      config:
+        - id: subprocess
+          name: '@deepseek-ai/dsh-subprocess-local'
+
+        # The sandboxed filesystem provider. `cwd` defaults to `process.cwd()`; an
+        # overlay can pin another workspace.
+        - id: fs-sandbox
+          name: '@deepseek-ai/dsh-fs-sandbox'
+
+        - id: world
+          name: '@deepseek-ai/dsh-world'
+
+    - id: world-router
+      name: '@deepseek-ai/dsh-world-router'
 
     # Every shipped CLI mode starts with the same file-effect boundary.
     # The environment remains an explicit deployment override; otherwise fresh
@@ -513,10 +537,8 @@
       config:
         agents: []
 
-    # The sandboxed filesystem provider. `cwd` defaults to `process.cwd()`; an
-    # overlay can pin another workspace.
-    - id: fs-sandbox
-      name: '@deepseek-ai/dsh-fs-sandbox'
+    # The sandboxed filesystem provider lives in the world-local group above;
+    # the facade row is what every consumer resolves.
 
     # The native DeepSeek adapter. No key or endpoint is inlined: both resolve per
     # request from the `llm-deepseek:` settings section over this entry, with the

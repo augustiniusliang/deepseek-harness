@@ -6,6 +6,10 @@
 
 来源：[`packages/world/world/src/index.ts`](../../packages/world/world/src/index.ts)
 
+## 门面与 realm 布局
+
+要路由的组合挂载 [dsh-world-router](../../packages/world/world-router/README.zh.md)：门面 `FileSystem`/`SubprocessRuntime` 提供者占据根部 `ctx.fs`/`ctx.subprocess` 座位，把每次调用委托给拥有它的世界。真正的本机提供者与 `ctx.worlds` 注册表同处于一个 isolate realm（隔离 `fs` + `subprocess`），因此注册表的内置 local 后端从自己所在 realm 读到真正的提供者——永远不会读到门面自身造成递归。消费方仍读 `ctx.fs`/`ctx.subprocess`，毫无感知。替换根部提供者的组合（测试 fixture 常这么做）禁用 `world-router` 行即可。
+
 ## 世界引用
 
 `WorldRef` 是编码世界的单个字符串：`local`、`wsl:<distro>`、`wsl:<distro>:<user>` 或 `ssh:<profileId>`。该字符串即 durable 与 wire 形态——`session/world` 事件载荷、`world` 投影状态与客户端视图都原样携带它。`parseWorldRef` 校验并分解它，`isWorldRef` 是不抛异常的判定，`formatWorldRef` 把解析结果重新编码；两者精确往返。注册表拒绝以保留的 `local` 引用注册的后端。

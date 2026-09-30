@@ -6,6 +6,10 @@ An execution world is one coherent filesystem + subprocess pair a session's capa
 
 Source: [`packages/world/world/src/index.ts`](../../packages/world/world/src/index.ts)
 
+## The facade and the realm layout
+
+A composition that routes mounts [dsh-world-router](../../packages/world/world-router/README.md): facade `FileSystem`/`SubprocessRuntime` providers take the root `ctx.fs`/`ctx.subprocess` seats and delegate every call to the world that owns it. The real local providers and the `ctx.worlds` registry live together in one isolate realm (`fs` + `subprocess` isolated), so the registry's built-in local backend reads the REAL providers from its own realm — never the facades, which would recurse. Consumers keep reading `ctx.fs`/`ctx.subprocess` and stay oblivious. A composition substituting its own root provider (test fixtures do this) disables the `world-router` row.
+
 ## The world reference
 
 A `WorldRef` is one string encoding the world: `local`, `wsl:<distro>`, `wsl:<distro>:<user>`, or `ssh:<profileId>`. The string is the durable and wire form — the `session/world` event payload, the `world` projection state, and the client view all carry it verbatim. `parseWorldRef` validates and decomposes it, `isWorldRef` is the non-throwing test, and `formatWorldRef` re-encodes a parsed reference; the pair round-trips exactly. The registry rejects a backend registered under the reserved `local` reference.

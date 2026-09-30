@@ -2,6 +2,10 @@
 - id: fs-sandbox
   disabled: true
 
+# The fixture substitutes the root provider, so the world facades step aside.
+- id: world-router
+  disabled: true
+
 - insert:
     - id: provider-cwd-fs
       name: '../../../packages/bundle/headless/tests/fixtures/provider-cwd.ts'

@@ -174,6 +174,15 @@ describe('WorldRegistry', () => {
     ])
   })
 
+  it('looks up backends by reference, local included', async () => {
+    const ctx = await mounted()
+    const wsl = remoteBackend('wsl:Ubuntu', '/home/')
+    ctx.worlds.register(wsl)
+    expect(ctx.worlds.backendOf('wsl:Ubuntu')).toBe(wsl)
+    expect(ctx.worlds.backendOf('local')?.ref).toBe('local')
+    expect(ctx.worlds.backendOf('ssh:nowhere')).toBeUndefined()
+  })
+
   it('wraps the mounted fs and subprocess providers in the local backend', async () => {
     const ctx = new Context()
     await ctx.plugin(SessionProjectionRegistry)

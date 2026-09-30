@@ -1,0 +1,49 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/world/world-router/README.md
+/:
+  en: 78c2fe824c9ac2c0
+  zh: 9a5c9827d9e9c931
+/deepseek-ai-dsh-world-router:
+  en: 89e6cf83cece6c8c
+  zh: ca4353c39db0c02c
+/deepseek-ai-dsh-world-router/summary:
+  en: 94f5c71c37f71732
+  zh: 1ee049e5687821be
+/deepseek-ai-dsh-world-router/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 9f0336825ccdaacd
+/deepseek-ai-dsh-world-router/use-this-package:
+  en: bb554331cd69ff67
+  zh: 847fa70a03ec84b1
+/deepseek-ai-dsh-world-router/use-this-package/when-to-choose-it:
+  en: 83d824feae13d81f
+  zh: 322267396a1b45ce
+/deepseek-ai-dsh-world-router/use-this-package/minimal-configuration:
+  en: b742a5a22dd9e323
+  zh: f4e0c7032e09a332
+/deepseek-ai-dsh-world-router/use-this-package/substituting-a-root-provider:
+  en: 9fbe916b89a2718f
+  zh: 646b2ce83490958a
+/deepseek-ai-dsh-world-router/understand-the-implementation:
+  en: e3e8e08174dab322
+  zh: f85817c39f094a5a
+/deepseek-ai-dsh-world-router/understand-the-implementation/source-map:
+  en: e18be9f339cecd98
+  zh: 2eec8af6b7a761af
+/deepseek-ai-dsh-world-router/further-exploration:
+  en: 345c3146e3cc6593
+  zh: cbf6d599381782f0
+/deepseek-ai-dsh-world-router/model-experience:
+  en: 33a44e2940b6a373
+  zh: 6fdc75871e70a54a
+/deepseek-ai-dsh-world-router/model-experience/kv-cache-effect:
+  en: d8163dd041845191
+  zh: 22e45508aaa9d4e6
+/deepseek-ai-dsh-world-router/known-limitations-and-deferred-work:
+  en: d251d6772a569fb0
+  zh: 4f818386fe30279a
+/deepseek-ai-dsh-world-router/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e88aeb617ffb74ea
