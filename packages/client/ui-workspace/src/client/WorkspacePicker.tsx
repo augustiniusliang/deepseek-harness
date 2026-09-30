@@ -23,19 +23,22 @@ import type {
 import { workspaceDisplayTitle } from '@deepseek-ai/dsh-api-workspace-controller/default-workspace'
 import type { SnapshotSelectorHook } from '@deepseek-ai/dsh-client-ui-slots'
 import type { DirectoryFlowOwnerProps, WorkspacePickerProps } from './contract/slots.ts'
-import type { Project, ProjectCreateInput, ProjectOverlay } from './projects.ts'
-import { ProjectCreateDialog } from './ProjectDialogs.tsx'
+import type { Project, ProjectCreateInput, ProjectOverlay, ProjectUpdateInput } from './projects.ts'
+import { ProjectCreateDialog, ProjectFoldersDialog } from './ProjectDialogs.tsx'
 import { owningProject } from './tree.ts'
 import css from './WorkspacePicker.module.css'
 
 const ADD_WORKSPACE = '::add-workspace'
+const MANAGE_FOLDERS = '::manage-project-folders'
 
-/** Project share of one picker surface: the overlay read plus the creation write. */
+/** Project share of one picker surface: the overlay read plus the creation and folder writes. */
 export interface PickerProjectShare {
   /** Selector hook over the published project overlay (framework-bound). */
   useProjects: SnapshotSelectorHook<ProjectOverlay | undefined>
   /** Create a project once its primary root exists as a Host Workspace. */
   createProject: (input: ProjectCreateInput) => Promise<Project>
+  /** Patch the project's name and/or roots (the folder manager's write). */
+  updateProject: (input: ProjectUpdateInput) => Promise<Project>
   /** Read the overlay again when the creation dialog opens. */
   refreshProjects: () => Promise<void>
 }
@@ -107,6 +110,7 @@ export function WorkspacePickFlow({
   const [modalError, setModalError] = useState<string | null>(null)
   const [flowOpen, setFlowOpen] = useState(false)
   const [createOpen, setCreateOpen] = useState(false)
+  const [foldersProject, setFoldersProject] = useState<Project | null>(null)
   const [pickingFolder, setPickingFolder] = useState(false)
   // One picking interaction at a time: while the flow is open (native chooser
   // pending, browse dialog up), the creation dialog is up, or its pick is
@@ -139,29 +143,47 @@ export function WorkspacePickFlow({
   // With workspaces listed, the add action pins below the scroll region
   // (divider + always visible); otherwise it IS the menu.
   const pinAdd = !addOnly && workspaces.length > 0
-  const items: MenuEntry[] = pinAdd
-    ? workspaces.map((workspace) => {
-      const owned = owningProject(workspace, projects)
-      return {
-        id: workspace.workspaceId,
-        // A project-owned Workspace answers to the project's name and says how
-        // many folders the project spans; the Workspace title is the fallback
-        // for every other row.
-        label: owned === undefined
-          ? workspaceDisplayTitle(workspace.title, t('workspace.defaultName'))
-          : (
-            <span className={css.projectLabel}>
-              <span className={css.projectLabelName}>{owned.name}</span>
-              <span className={css.projectLabelMeta}>
-                {t(owned.roots.length === 1 ? 'project.folders.one' : 'project.folders.other', { n: owned.roots.length })}
+  // The Workspace a Session currently targets: when a project owns it, that
+  // project's folder manager belongs on this same menu, so a running
+  // conversation can widen its project without leaving the composer.
+  const selectedWorkspace = selectedId === undefined
+    ? undefined
+    : workspaces.find(workspace => workspace.workspaceId === selectedId)
+  const selectedProject = selectedWorkspace === undefined ? undefined : owningProject(selectedWorkspace, projects)
+  const manageEntries: MenuEntry[] = selectedProject === undefined
+    ? []
+    : [{
+      id: MANAGE_FOLDERS,
+      label: t('menu.manageProjectFolders'),
+      icon: <IconFolderCloseRegular size={16} />,
+      disabled: flowBusy,
+    }]
+  const items: MenuEntry[] = [
+    ...(pinAdd
+      ? workspaces.map((workspace) => {
+        const owned = owningProject(workspace, projects)
+        return {
+          id: workspace.workspaceId,
+          // A project-owned Workspace answers to the project's name and says how
+          // many folders the project spans; the Workspace title is the fallback
+          // for every other row.
+          label: owned === undefined
+            ? workspaceDisplayTitle(workspace.title, t('workspace.defaultName'))
+            : (
+              <span className={css.projectLabel}>
+                <span className={css.projectLabelName}>{owned.name}</span>
+                <span className={css.projectLabelMeta}>
+                  {t(owned.roots.length === 1 ? 'project.folders.one' : 'project.folders.other', { n: owned.roots.length })}
+                </span>
               </span>
-            </span>
-          ),
-        icon: <IconFolderCloseRegular size={16} />,
-        disabled: flowBusy,
-      }
-    })
-    : addEntries
+            ),
+          icon: <IconFolderCloseRegular size={16} />,
+          disabled: flowBusy,
+        }
+      })
+      : addEntries),
+    ...manageEntries,
+  ]
   // Nothing listed and nothing to add with (a composition that mounts this
   // package without any directory-picker): an empty popover would claim a
   // choice that does not exist, so the anchor gesture shows nothing at all.
@@ -208,7 +230,7 @@ export function WorkspacePickFlow({
   // the arriving list would have made unnecessary; the add-only surface lists
   // nothing and never waits.
   const listSettled = addOnly || workspaceSnapshot.phase === 'ready'
-  const addIsTheOnlyEntry = !pinAdd && listSettled && addEntries.length === 1
+  const addIsTheOnlyEntry = !pinAdd && listSettled && addEntries.length === 1 && manageEntries.length === 0
   // `flowBusy` gates this exactly as it disables the equivalent menu entry: an
   // interaction still owning the surface keeps the gesture parked.
   useEffect(() => {
@@ -237,6 +259,11 @@ export function WorkspacePickFlow({
     if (id === ADD_WORKSPACE) {
       if (projectMode) openCreateProject()
       else openDirectoryFlow()
+      return
+    }
+    if (id === MANAGE_FOLDERS) {
+      onClose()
+      setFoldersProject(selectedProject ?? null)
       return
     }
     onPick(id as WorkspaceId)
@@ -269,6 +296,16 @@ export function WorkspacePickFlow({
             setCreateOpen(false)
             onPick(workspaceId)
           }}
+          useDirectoryFlow={useDirectoryFlow}
+          renderDirectoryFlow={renderDirectoryFlow}
+        />
+      )}
+      {foldersProject !== null && (
+        <ProjectFoldersDialog
+          t={t}
+          project={foldersProject}
+          onClose={() => { setFoldersProject(null) }}
+          updateProject={project.updateProject}
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={renderDirectoryFlow}
         />
@@ -310,6 +347,7 @@ export function WorkspacePicker({
   useDirectoryFlow,
   useProjects,
   createProject,
+  updateProject,
   refreshProjects,
   renderSlot,
   t,
@@ -323,7 +361,7 @@ export function WorkspacePicker({
       createWorkspace={createWorkspace}
       useDirectoryFlow={useDirectoryFlow}
       renderDirectoryFlow={owner => renderSlot('conversation.hero.workspace.directoryFlow', owner)}
-      project={{ useProjects, createProject, refreshProjects }}
+      project={{ useProjects, createProject, updateProject, refreshProjects }}
       selectedId={selectedId}
       onPick={onPick}
       onClose={onClose}

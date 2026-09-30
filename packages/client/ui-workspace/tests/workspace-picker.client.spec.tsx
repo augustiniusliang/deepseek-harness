@@ -96,6 +96,7 @@ function mount(
   createWorkspace = vi.fn(),
   occupancy = occupancySource(),
   projects?: ProjectOverlay,
+  selectedId?: WorkspaceId,
 ) {
   const onPick = vi.fn()
   const onClose = vi.fn()
@@ -121,6 +122,7 @@ function mount(
       refreshProjects={vi.fn(async () => {})}
       useDirectoryFlow={occupancy.useDirectoryFlow}
       renderSlot={renderSlot}
+      selectedId={selectedId}
       t={t}
     />
   )
@@ -144,6 +146,24 @@ describe('WorkspacePicker', () => {
     expect(entries).toHaveLength(2)
     fireEvent.click(entries[1]!)
     expect(b.onPick).toHaveBeenCalledWith(wid('beta'))
+  })
+
+  it('offers the project folder manager for the selected project-owned Workspace and opens it', () => {
+    const overlay = projectOverlay([{
+      id: 'p1', name: 'Alpha project',
+      roots: [{ path: '/projects/alpha' }, { path: '/projects/extra' }],
+      createdAt: 0,
+    }])
+    const b = mount([workspace('alpha', 'Alpha')], vi.fn(), undefined, overlay, wid('alpha'))
+    const manage = screen.getByRole('menuitem', { name: '管理项目文件夹…' })
+    fireEvent.click(manage)
+    expect(b.onClose).toHaveBeenCalled()
+    expect(screen.getByText('管理「Alpha project」的文件夹')).toBeTruthy()
+  })
+
+  it('keeps the folder manager off the menu when the selected Workspace belongs to no project', () => {
+    mount([workspace('alpha', 'Alpha')], vi.fn(), undefined, projectOverlay([]), wid('alpha'))
+    expect(screen.queryByRole('menuitem', { name: '管理项目文件夹…' })).toBeNull()
   })
 
   it('opens the composed directory flow, adopts its picked path, and selects the returned Workspace', async () => {

@@ -1382,7 +1382,7 @@ export function WorkspaceBrowser({
           createWorkspace={createWorkspace}
           useDirectoryFlow={useDirectoryFlow}
           renderDirectoryFlow={owner => renderSlot('sidebar.workspaces.directoryFlow', owner)}
-          project={{ useProjects, createProject, refreshProjects }}
+          project={{ useProjects, createProject, updateProject, refreshProjects }}
           addOnly
           onBusyChange={setDirectoryBusy}
           side="right"
