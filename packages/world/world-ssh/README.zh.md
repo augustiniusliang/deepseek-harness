@@ -7,22 +7,22 @@ kind: "package-reference"
 
 [English](README.md) | 中文
 
-## 摘要
+## 概述
 
 用本包让会话在远端主机上工作，VS Code Remote-SSH 风格，远端除 SSH 服务器与 POSIX shell 外无需安装任何东西。每个配置的 SSH profile 注册一个 `WorldBackend` 进 `ctx.worlds`：池化的常驻 bash 会话承载命令与文件系统帧，`ssh -tt` 通道承载持久终端，世界自带的 `bash`/`grep`/`glob` 工具在 SSH 会话里回答模型。profile 与工作区从 dsh-remote-ssh 插件拥有的 `remote-ssh` settings 条目只读消费。没有可用的 OpenSSH 客户端或零个已配置 profile 时，插件什么都不注册，组合照常启动。
 
 ## 目录
 
-- [使用本包](#使用本包)
-- [理解实现](#理解实现)
-- [进一步探索](#进一步探索)
-- [模型体验](#模型体验)
-- [已知限制与暂缓工作](#已知限制与暂缓工作)
-- [开发注记](#开发注记)
+- [使用本包](#use-this-package)
+- [理解实现](#understand-the-implementation)
+- [延伸阅读](#further-exploration)
+- [模型体验](#model-experience)
+- [已知限制与延后工作](#known-limitations-and-deferred-work)
+- [开发备注](#dev-note)
 
 -----
 
-<a id="使用本包"></a>
+<a id="use-this-package"></a>
 ## 使用本包
 
 当允许 SSH 会话时，把本包挂在世界注册表旁（base 组合把它挂在 `world-local` isolate 领域内）。
@@ -48,7 +48,7 @@ profile 值的读取顺序是先 `settings.describe()` 的实时值，再 loader
 
 -----
 
-<a id="理解实现"></a>
+<a id="understand-the-implementation"></a>
 ## 理解实现
 
 <details>
@@ -80,8 +80,8 @@ subprocess 后端把每次 spawn 翻译成带 `cd` 前缀的池化 `bash -lc`，
 
 -----
 
-<a id="进一步探索"></a>
-## 进一步探索
+<a id="further-exploration"></a>
+## 延伸阅读
 
 阅读这些页面了解本后端注册进的注册表与路由到它的门面。
 
@@ -92,7 +92,7 @@ subprocess 后端把每次 spawn 翻译成带 `cd` 前缀的池化 `bash -lc`，
 
 -----
 
-<a id="模型体验"></a>
+<a id="model-experience"></a>
 ## 模型体验
 
 间接地，通过世界自带的 `bash`/`grep`/`glob` 工具——其名称、参数 schema、上限、输出渲染与搜索卡片逐字镜像宿主套件（`dsh-tool-bash`、`dsh-tool-fs-search`）——模型看到同一份契约，只是执行在远端主机上。在 SSH 会话里，这些定义通过工具注册表的世界亲和过滤以同名遮蔽宿主工具。
@@ -101,9 +101,9 @@ subprocess 后端把每次 spawn 翻译成带 `cd` 前缀的池化 `bash -lc`，
 
 在 SSH 会话里，工具目录把宿主 shell 与搜索工具换成同名等价物；目录的其余部分不动，本地会话的请求前缀与没有本包的组合逐字节一致。
 
-## 已知限制与暂缓工作
+## 已知限制与延后工作
 
-<a id="已知限制与暂缓工作"></a>
+<a id="known-limitations-and-deferred-work"></a>
 
 这些限制定义了本包提供的 SSH 世界。它们是当前的包约束，不是任务清单。
 
@@ -114,8 +114,8 @@ subprocess 后端把每次 spawn 翻译成带 `cd` 前缀的池化 `bash -lc`，
 - **远端围栏是粗粒度的**——可写根是配置的工作区 `remotePath` 加 `/tmp`；每用户 sudo、ACL 与每仓库策略由远端主机自己的强制承担（`enforcement: 'partial'`）。
 - **一次会话丢弃会取消其在途命令**——超时、8 MB 溢出与传输丢弃（exit 255）会杀掉池化会话；下一条命令回退到一次性运行，但被中断命令的副作用就是远端 shell 已做的一切。
 
-<a id="开发注记"></a>
-### 开发注记
+<a id="dev-note"></a>
+### 开发备注
 
 <details>
 <summary>维护者工作上下文——点击展开</summary>

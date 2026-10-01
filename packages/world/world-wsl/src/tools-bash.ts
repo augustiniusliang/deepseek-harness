@@ -99,6 +99,7 @@ function wslSession(ctx: Context, exec: ToolRunContext): WslSessionTarget | unde
   }
 }
 
+/* jscpd:ignore-start -- intentional verbatim mirror of the host bash tool's render contract */
 /** Render one foreground result exactly like the host bash tool's render (minus sandbox markers). */
 function renderWslResult(result: WslBashResult): string {
   const out = result.stdout.truncated && result.stdout.spillPath !== undefined
@@ -119,6 +120,7 @@ function renderWslResult(result: WslBashResult): string {
   markers.push(`[exit code: ${result.exitCode ?? 'null'}]`)
   return markers.length === 0 ? body : `${body}\n\n${markers.join('\n')}`
 }
+/* jscpd:ignore-end */
 
 /**
  * Register the WSL world's bash tool.

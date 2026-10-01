@@ -156,6 +156,7 @@ function acceptRun(run: { stdout: string; exitCode: number | null; stderr: strin
   return run.stdout
 }
 
+// jscpd:ignore-start -- world grep/glob mirror the host suite's schemas and presenters verbatim (world-wsl shares the plumbing)
 /**
  * Register the SSH world's `grep` and `glob` tools.
  * @param ctx - the world-ssh plugin context.
@@ -354,3 +355,4 @@ export function registerSshSearchTools(ctx: Context): void {
     presentResult: presentGlobResult,
   }))
 }
+/* jscpd:ignore-end */

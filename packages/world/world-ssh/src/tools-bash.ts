@@ -47,6 +47,7 @@ interface SshBashResult {
   stderr: { text: string; truncated: boolean; spillPath?: string }
 }
 
+// jscpd:ignore-start -- world bash mirrors the host suite's output shapes and rendering verbatim (world-wsl shares the plumbing)
 /** The session's SSH backend coordinates, or undefined when the session is not in an SSH world. */
 function sshSession(ctx: Context, exec: ToolRunContext): { backendSubprocess: import('@deepseek-ai/dsh-subprocess').SubprocessRuntime } | undefined {
   const session = exec.agent?.session
@@ -189,6 +190,8 @@ export function registerSshBashTool(ctx: Context): void {
     },
   }))
 }
+
+/* jscpd:ignore-end */
 
 /** Re-export for the search tools: POSIX single-quote via the shared helper. */
 export { shellQuote, posix }

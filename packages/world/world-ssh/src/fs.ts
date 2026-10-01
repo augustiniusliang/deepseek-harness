@@ -366,6 +366,7 @@ export class SshFileSystem extends FileSystem {
   }
 
   // ---- mutations: fence + temp+rename ----------------------------------------
+  // jscpd:ignore-start -- the fence shape follows the dsh-world-wsl checkedTarget pattern on purpose
 
   /**
    * The remote fence: the per-call policy (passed by the world router verbatim)
@@ -439,6 +440,8 @@ export class SshFileSystem extends FileSystem {
       'FS_SANDBOX_DENIED',
     )
   }
+
+  // jscpd:ignore-end
 
   /** Atomically publish staged content to a remote path (temp + rename). */
   private async writeRemote(remote: string, content: string, expected: FsWriteIntent | undefined, signal?: AbortSignal): Promise<void> {

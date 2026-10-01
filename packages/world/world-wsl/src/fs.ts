@@ -322,6 +322,7 @@ export class WslFileSystem extends LocalFileSystem {
     return roots
   }
 
+  // jscpd:ignore-start -- the fence mirrors dsh-fs-sandbox's checkedTarget/underRoot verbatim by design
   /** Whether a canonical target key is a writable root or sits below one. */
   private underRoot(targetKey: string, root: string): boolean {
     const key = trimTrailing(canonicalPath(targetKey)).toLowerCase()
@@ -370,6 +371,7 @@ export class WslFileSystem extends LocalFileSystem {
   ): Promise<FsEditOutcome> {
     return super.editText(await this.checkedTarget(target, sandboxPolicy), edit, expected, signal)
   }
+  // jscpd:ignore-end
 
   override processPath(target: FsTarget): string {
     const key = String(target.targetKey)

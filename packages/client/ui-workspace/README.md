@@ -11,7 +11,7 @@ Desktop product events use the optional [product analytics service](../product-a
 
 ## Summary
 
-This package lets users browse grouped or flat Session lists, choose a Workspace for a new Session, and manage Workspaces and Sessions through add, rename, reorder, search, fork, archive, and Workspace deletion; the Session row menu and its hover buttons are slot lists that client plugins extend. A deployment serving the project overlay (see [Workspace hierarchy](#workspace-hierarchy)) presents each Workspace that a project owns as that project, and adding creates a project instead. Pending interactions appear as warning dots, and subagent-origin Sessions remain hidden. An idle, unarchived Session row with active scheduled tasks shows a clock mark, and its hover card lists those tasks. Canonically distinct folder paths remain separate Workspaces. Adding requires a composed directory picker; without one, adding is unavailable.
+This package lets users browse grouped or flat Session lists, choose a Workspace for a new Session, and manage Workspaces and Sessions through add, rename, reorder, search, fork, archive, and Workspace deletion; the Session row menu and its hover buttons are slot lists that client plugins extend. A deployment serving the project overlay presents each project-owned Workspace as that project, and adding creates a project. Pending interactions appear as warning dots, and subagent-origin Sessions stay hidden. Adding requires a composed directory picker; without one, adding is unavailable.
 
 ## Table of Contents
 
