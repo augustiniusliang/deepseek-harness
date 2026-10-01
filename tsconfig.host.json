@@ -377,6 +377,7 @@
     { "path": "./packages/sandbox/sandbox-windows-acl" },
     { "path": "./packages/world/world" },
     { "path": "./packages/world/world-router" },
+    { "path": "./packages/world/world-wsl" },
     { "path": "./packages/shell/bash-sandbox" },
     { "path": "./packages/shell/tool-bash" },
     { "path": "./packages/deliverables/tool-present" },

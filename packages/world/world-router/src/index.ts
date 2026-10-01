@@ -46,6 +46,17 @@ import type {} from '@deepseek-ai/dsh-world'
 import type { SandboxExecutionPolicy, SandboxMode } from '@deepseek-ai/dsh-sandbox'
 
 /**
+ * Whether a path is absolute in the HOST's own grammar — drive-letter or UNC
+ * on Windows, POSIX-rooted elsewhere. A POSIX-rooted path on a Windows host is
+ * NOT host-absolute (it would resolve against the current drive); it names a
+ * Linux-world path, so an unclaimed one follows the cwd's world.
+ */
+function isHostAbsolute(path: string): boolean {
+  if (process.platform !== 'win32') return isAbsolute(path)
+  return /^[A-Za-z]:[\\/]/.test(path) || path.startsWith('\\\\') || path.startsWith('//')
+}
+
+/**
  * `ctx.fs` facade. Path-bearing operations (`resolve`, `lstat`,
  * `processPathFromHostPath`) route by path claim, then cwd, then local.
  * Target-bearing operations route to the backend that produced the target at
@@ -64,14 +75,15 @@ export class RouterFileSystem extends FileSystem {
 
   /**
    * Route by path claim, then cwd, then local. An unclaimed path that is
-   * absolute in the HOST grammar is a host-local path: it never follows a
-   * non-local cwd (a drive-letter path in a UNC-cwd session stays local).
-   * Relative paths carry no world identity, so the cwd's world resolves them.
+   * absolute in the HOST grammar ({@link isHostAbsolute}) never follows a
+   * non-local cwd (a drive-letter path in a UNC-cwd session stays local);
+   * relative paths — and POSIX-rooted paths on a Windows host — carry no
+   * host-world identity, so the cwd's world resolves them.
    */
   private route(path?: string, cwd?: string): WorldBackend {
     if (path !== undefined) {
       const claimed = this.ctx.worlds.resolve({ path })
-      if (claimed.ref !== LOCAL_WORLD_REF || cwd === undefined || isAbsolute(path)) return claimed
+      if (claimed.ref !== LOCAL_WORLD_REF || cwd === undefined || isHostAbsolute(path)) return claimed
       return this.ctx.worlds.resolve({ cwd })
     }
     return this.ctx.worlds.resolve(cwd === undefined ? {} : { cwd })
@@ -159,12 +171,12 @@ export class RouterFileSystem extends FileSystem {
 }
 
 /**
- * `ctx.subprocess` facade. `spawn` routes by the spec's cwd. `spawnTerminal`
- * first honors the spec's `DSH_SESSION_ID`: the session's `world` projection
- * pins the world exactly (a session whose world differs from what its cwd
- * spells), and the cwd route serves only when no session or projection value
- * is readable. Executable lookup and terminal-environment inspection are
- * host-local facts and always serve from the local world.
+ * `ctx.subprocess` facade. Every spawn honors the spec's `DSH_SESSION_ID`
+ * first: the session's `world` projection pins the backend exactly (a session
+ * whose world differs from what its cwd spells — e.g. a credential-registered
+ * drive workspace), and the cwd route serves only when no session or
+ * projection value is readable. Executable lookup and terminal-environment
+ * inspection are host-local facts and always serve from the local world.
  */
 export class RouterSubprocessRuntime extends SubprocessRuntime {
   static inject = ['worlds']
@@ -182,16 +194,22 @@ export class RouterSubprocessRuntime extends SubprocessRuntime {
   }
 
   override spawn(spec: SubprocessSpawnSpec): SubprocessHandle {
-    return this.ctx.worlds.resolve({ cwd: spec.cwd }).subprocess.spawn(spec)
+    return this.backendFor(spec).subprocess.spawn(spec)
   }
 
   override async spawnTerminal(spec: SubprocessTerminalSpawnSpec): Promise<SubprocessTerminalHandle> {
+    return this.backendFor(spec).subprocess.spawnTerminal(spec)
+  }
+
+  /** The session-pinned backend, else the cwd-routed one. */
+  private backendFor(spec: { cwd: string; env?: Readonly<Record<string, string | undefined>> | undefined }): WorldBackend {
     const sessionId = spec.env?.DSH_SESSION_ID
     const world = sessionId === undefined ? undefined : this.worldOfSession(sessionId)
-    const backend = world === undefined
-      ? this.ctx.worlds.resolve({ cwd: spec.cwd })
-      : this.ctx.worlds.backendOf(world) ?? this.ctx.worlds.resolve({ cwd: spec.cwd })
-    return backend.subprocess.spawnTerminal(spec)
+    if (world !== undefined) {
+      const pinned = this.ctx.worlds.backendOf(world)
+      if (pinned !== undefined) return pinned
+    }
+    return this.ctx.worlds.resolve({ cwd: spec.cwd })
   }
 
   /** The session's projected world, or undefined when the session or its projection is unreadable. */

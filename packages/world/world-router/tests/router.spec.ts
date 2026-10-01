@@ -181,8 +181,8 @@ async function mounted(): Promise<{ ctx: Context; local: FakeWorld }> {
   return { ctx, local }
 }
 
-function spawnSpec(cwd: string): SubprocessSpawnSpec {
-  return { argv: ['pwd'], cwd, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }, graceMs: 100 }
+function spawnSpec(cwd: string, env?: Record<string, string>): SubprocessSpawnSpec {
+  return { argv: ['pwd'], cwd, env, stdio: { stdin: 'ignore', stdout: 'pipe', stderr: 'pipe' }, graceMs: 100 }
 }
 
 function terminalSpec(cwd: string, env?: Record<string, string>): SubprocessTerminalSpawnSpec {
@@ -224,6 +224,25 @@ describe('RouterFileSystem', () => {
     expect(local.fs.calls).toEqual(['resolve:src/other.ts'])
     await ctx.fs.lstat('nested', { cwd: '/home/u' })
     expect(wsl.fs.calls).toEqual(['resolve:src/index.ts', 'lstat:nested'])
+  })
+
+  it('routes an unclaimed POSIX-rooted path by the cwd world on a Windows host grammar', async () => {
+    const { ctx, local } = await mounted()
+    const wsl = fakeWorld('wsl:Ubuntu', ['\\\\wsl$\\Ubuntu\\'], ['\\\\wsl$\\Ubuntu\\'])
+    ctx.worlds.register(wsl.backend)
+
+    // '/etc/hosts' claims no backend and is not host-absolute on win32, so the
+    // UNC cwd's world resolves it. (On POSIX hosts the same call stays local —
+    // the assertion splits by platform grammar.)
+    const target = await ctx.fs.resolve('/etc/hosts', { cwd: '\\\\wsl$\\Ubuntu\\home\\u' })
+    if (process.platform === 'win32') {
+      expect(wsl.fs.calls).toEqual(['resolve:/etc/hosts'])
+      expect(local.fs.calls).toEqual([])
+    } else {
+      expect(local.fs.calls).toEqual(['resolve:/etc/hosts'])
+      expect(wsl.fs.calls).toEqual([])
+    }
+    void target
   })
 
   it('routes target-bearing reads to the resolving backend and unknown targets to local', async () => {
@@ -298,13 +317,19 @@ describe('RouterSubprocessRuntime', () => {
     expect(wsl.subprocess.calls).toEqual(['spawnTerminal:C:\\work'])
     expect(localSubprocess.calls).toEqual([])
 
+    // spawn honors the same pin (a credential-registered drive workspace keeps
+    // its drive-letter cwd while running inside its world).
+    ctx.subprocess.spawn(spawnSpec('C:\\work', { DSH_SESSION_ID: sessionId }))
+    expect(wsl.subprocess.calls).toEqual(['spawnTerminal:C:\\work', 'spawn:C:\\work'])
+    expect(localSubprocess.calls).toEqual([])
+
     // An unknown session id falls back to the cwd route.
     await ctx.subprocess.spawnTerminal(terminalSpec('C:\\work', { DSH_SESSION_ID: 'sess-unknown' }))
     expect(localSubprocess.calls).toEqual(['spawnTerminal:C:\\work'])
 
     // No DSH_SESSION_ID routes by cwd alone.
     await ctx.subprocess.spawnTerminal(terminalSpec('/home/u/project'))
-    expect(wsl.subprocess.calls).toEqual(['spawnTerminal:C:\\work', 'spawnTerminal:/home/u/project'])
+    expect(wsl.subprocess.calls).toEqual(['spawnTerminal:C:\\work', 'spawn:C:\\work', 'spawnTerminal:/home/u/project'])
   })
 
   it('routes terminals by cwd when the projection services are absent', async () => {

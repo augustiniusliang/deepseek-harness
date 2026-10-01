@@ -68,7 +68,7 @@ A composition that mounts its own root `ctx.fs`/`ctx.subprocess` (a test fixture
 
 `RouterFileSystem` routes path-bearing operations (`resolve`, `lstat`, `processPathFromHostPath`) by the registry's claim-then-cwd-then-local rule, with one refinement: an unclaimed path that is absolute in the host grammar stays local rather than following a non-local cwd. Target-bearing operations route to the backend that produced the target, recorded in a `WeakMap` at `resolve()` time; a target the facade never resolved falls back to local. `writeText`/`editText` pass the per-call `SandboxExecutionPolicy` through untouched, and `sandboxMode` reports the local backend's default — the capability fact tools advertise escalation from.
 
-`RouterSubprocessRuntime` routes `spawn` by the spec's cwd. `spawnTerminal` first reads the spec's `DSH_SESSION_ID`, resolves the session through `ctx.sessions`, and pins the backend by its `world` projection value — covering terminals whose cwd spelling does not reveal the session's world; when the session or projection is unreadable, the cwd route applies. Executable lookup and terminal-environment inspection are host-local facts and always serve from the local world.
+`RouterSubprocessRuntime` routes every spawn by the session first: a spec carrying `DSH_SESSION_ID` pins the backend by that session's `world` projection (covering worlds whose cwd spelling does not reveal them), and the cwd route serves only when the session or projection is unreadable. Executable lookup and terminal-environment inspection are host-local facts and always serve from the local world.
 
 ### Source map
 

@@ -1,0 +1,49 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/world/world-wsl/README.md
+/:
+  en: 16491f0671be6a56
+  zh: 6a5acc225e69e5f1
+/deepseek-ai-dsh-world-wsl:
+  en: 1ee71b9a44537547
+  zh: e92f510d8d558334
+/deepseek-ai-dsh-world-wsl/summary:
+  en: c37257f62978fe08
+  zh: 689f38d3a5f08aa0
+/deepseek-ai-dsh-world-wsl/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 9f0336825ccdaacd
+/deepseek-ai-dsh-world-wsl/use-this-package:
+  en: b94041fcf81cf30a
+  zh: 38cec5be5e84d6bb
+/deepseek-ai-dsh-world-wsl/use-this-package/when-to-choose-it:
+  en: b097dce5f775512e
+  zh: 0ad58bcfdd4aa909
+/deepseek-ai-dsh-world-wsl/use-this-package/minimal-configuration:
+  en: 5c04b70e97e00fe2
+  zh: e4d20f42ec30ae4a
+/deepseek-ai-dsh-world-wsl/use-this-package/registering-workspaces:
+  en: 2b05f9b2f9eddd16
+  zh: 0f3bae121692ea5e
+/deepseek-ai-dsh-world-wsl/understand-the-implementation:
+  en: 63a6ae86afe3f7c4
+  zh: 3b20626efcf23132
+/deepseek-ai-dsh-world-wsl/understand-the-implementation/source-map:
+  en: d7b44e1a4fd356f3
+  zh: 951912fa9a8012ad
+/deepseek-ai-dsh-world-wsl/further-exploration:
+  en: 97a76100975aa296
+  zh: 4b2964fb74e4db66
+/deepseek-ai-dsh-world-wsl/model-experience:
+  en: 5b01bf1a66fd75a3
+  zh: 8b9933c617a6ada1
+/deepseek-ai-dsh-world-wsl/model-experience/kv-cache-effect:
+  en: 4c7bc3fc75cdebe1
+  zh: 48327e9408ea70f8
+/deepseek-ai-dsh-world-wsl/known-limitations-and-deferred-work:
+  en: cfb8f216e9a60eb8
+  zh: d6b80b28c75a4e9e
+/deepseek-ai-dsh-world-wsl/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e88aeb617ffb74ea

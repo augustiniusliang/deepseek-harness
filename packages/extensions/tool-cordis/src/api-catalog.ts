@@ -3762,6 +3762,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         parameters: [],
         returns: 'one entry per world, for UI display and remote export.',
       },
+      {
+        signature: 'backendOf(ref: WorldRef): WorldBackend | undefined',
+        description: 'Look up one world by reference, local included.',
+        parameters: [{ name: 'ref', description: 'the world reference.' }],
+        returns: 'the backend carrying `ref`, or undefined when no registered world does.',
+      },
     ],
   },
 ]

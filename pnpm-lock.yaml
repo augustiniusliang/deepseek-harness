@@ -2181,6 +2181,9 @@ importers:
       '@deepseek-ai/dsh-world-router':
         specifier: workspace:*
         version: link:../../world/world-router
+      '@deepseek-ai/dsh-world-wsl':
+        specifier: workspace:*
+        version: link:../../world/world-wsl
     devDependencies:
       '@deepseek-ai/cordis':
         specifier: workspace:~
@@ -14014,6 +14017,30 @@ importers:
       '@deepseek-ai/dsh-session-projection':
         specifier: workspace:*
         version: link:../../session/session-projection
+      '@deepseek-ai/dsh-subprocess':
+        specifier: workspace:*
+        version: link:../../subprocess/subprocess
+      '@deepseek-ai/dsh-world':
+        specifier: workspace:*
+        version: link:../world
+
+  packages/world/world-wsl:
+    devDependencies:
+      '@deepseek-ai/cordis':
+        specifier: workspace:~
+        version: link:../../../vendor/cordis
+      '@deepseek-ai/dsh-fs':
+        specifier: workspace:*
+        version: link:../../fs/fs
+      '@deepseek-ai/dsh-fs-local':
+        specifier: workspace:*
+        version: link:../../fs/fs-local
+      '@deepseek-ai/dsh-sandbox':
+        specifier: workspace:*
+        version: link:../../sandbox/sandbox
+      '@deepseek-ai/dsh-sandbox-policy':
+        specifier: workspace:*
+        version: link:../../sandbox/sandbox-policy
       '@deepseek-ai/dsh-subprocess':
         specifier: workspace:*
         version: link:../../subprocess/subprocess

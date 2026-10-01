@@ -241,6 +241,12 @@
         - id: world
           name: '@deepseek-ai/dsh-world'
 
+        # WSL worlds: registers one backend per installed distribution into the
+        # registry, and claims WSL paths for the sandbox policy. Silent (one
+        # info line) off Windows or with no distribution installed.
+        - id: world-wsl
+          name: '@deepseek-ai/dsh-world-wsl'
+
     - id: world-router
       name: '@deepseek-ai/dsh-world-router'
 

@@ -68,7 +68,7 @@ kind: "package-reference"
 
 `RouterFileSystem` 按注册表的认领-cwd-local 规则路由带路径操作（`resolve`、`lstat`、`processPathFromHostPath`），外加一条细化：未被认领但在宿主机语法下绝对的路径保持本机，不跟随非本机 cwd。带 target 的操作路由到产出该 target 的后端——`resolve()` 时记入 `WeakMap`；门面从未解析过的 target 落到 local。`writeText`/`editText` 原样透传逐调用 `SandboxExecutionPolicy`，`sandboxMode` 报告本机后端的默认值——工具据此宣传升权的能力事实。
 
-`RouterSubprocessRuntime` 按 spec 的 cwd 路由 `spawn`。`spawnTerminal` 先读 spec 的 `DSH_SESSION_ID`，经 `ctx.sessions` 解析会话，按其 `world` 投影值钉住后端——覆盖 cwd 拼写无法显示会话世界的终端；会话或投影不可读时退回 cwd 路由。可执行文件查找与终端环境探查是宿主机本地事实，始终由本机世界服务。
+`RouterSubprocessRuntime` 每次 spawn 先按会话路由：携带 `DSH_SESSION_ID` 的 spec 按该会话的 `world` 投影钉住后端（覆盖 cwd 拼写无法显示其世界的情况），会话或投影不可读时才退回 cwd 路由。可执行文件查找与终端环境探查是宿主机本地事实，始终由本机世界服务。
 
 ### 源码地图
 

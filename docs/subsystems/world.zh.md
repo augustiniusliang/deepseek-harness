@@ -69,6 +69,13 @@ detectWorldForCwd(cwd?: string): WorldRef
  * @returns one entry per world, for UI display and remote export.
  */
 list(): { ref: WorldRef; displayName: string }[]
+
+/**
+ * Look up one world by reference, local included.
+ * @param ref - the world reference.
+ * @returns the backend carrying `ref`, or undefined when no registered world does.
+ */
+backendOf(ref: WorldRef): WorldBackend | undefined
 ```
 
 Source: [`packages/world/world/src/index.ts`](../../packages/world/world/src/index.ts)

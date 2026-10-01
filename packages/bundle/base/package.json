@@ -118,6 +118,7 @@
     "@deepseek-ai/dsh-web": "workspace:*",
     "@deepseek-ai/dsh-world": "workspace:*",
     "@deepseek-ai/dsh-world-router": "workspace:*",
+    "@deepseek-ai/dsh-world-wsl": "workspace:*",
     "@deepseek-ai/dsh-web-fetch-http": "workspace:*",
     "@deepseek-ai/dsh-web-search-deepseek": "workspace:*",
     "@deepseek-ai/dsh-workflow-ptc": "workspace:*",
