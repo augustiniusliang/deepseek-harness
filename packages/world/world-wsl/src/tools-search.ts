@@ -92,7 +92,7 @@ import { getWorkspaceUsername } from './credentials.ts'
  * (Debian, Ubuntu, Fedora, Arch, openSUSE) ships GNU grep; Alpine's busybox grep
  * would report that clearly.
  */
-const GREP_SCRIPT = [
+export const GREP_SCRIPT = [
   'set -u',
   'pattern=$1; include=$2; target=$3; cap=$4',
   '[ -n "$target" ] || target=.',
@@ -134,7 +134,7 @@ const GREP_SCRIPT = [
  * too. `PIPESTATUS[0]` is what the script exits with, because a `find` that
  * cannot read the target must not look like an empty directory.
  */
-const GLOB_SCRIPT = [
+export const GLOB_SCRIPT = [
   'set -u',
   'target=$1; cap=$2',
   '[ -n "$target" ] || target=.',

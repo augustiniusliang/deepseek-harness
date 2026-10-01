@@ -560,6 +560,7 @@
       "@deepseek-ai/dsh-world": ["./packages/world/world/src"],
       "@deepseek-ai/dsh-world/invariant": ["./packages/world/world/src/invariant.ts"],
       "@deepseek-ai/dsh-world-router": ["./packages/world/world-router/src"],
+      "@deepseek-ai/dsh-world-ssh": ["./packages/world/world-ssh/src"],
       "@deepseek-ai/dsh-world-wsl": ["./packages/world/world-wsl/src"]
       // END generated package aliases
     }

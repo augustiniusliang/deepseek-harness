@@ -378,6 +378,7 @@
     { "path": "./packages/world/world" },
     { "path": "./packages/world/world-router" },
     { "path": "./packages/world/world-wsl" },
+    { "path": "./packages/world/world-ssh" },
     { "path": "./packages/shell/bash-sandbox" },
     { "path": "./packages/shell/tool-bash" },
     { "path": "./packages/deliverables/tool-present" },

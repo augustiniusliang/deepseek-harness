@@ -9,7 +9,7 @@ kind: "package-group"
 
 ## 概述
 
-`world/` 组负责命名并路由执行世界——会话的文件系统与子进程调用所在的环境（`local`、某个 WSL 发行版、某个 SSH profile）。由三个包交付：`world/` 拥有 `WorldRef` 语法、`WorldBackend` 提供者契约、带内置 local 兜底的 `ctx.worlds` 注册表，以及会话级 `session/world` 记录与其投影；`world-router/` 挂载门面 `ctx.fs`/`ctx.subprocess`，把每次调用委托给拥有它的世界；`world-wsl/` 为每个已安装发行版注册一个 WSL 后端。
+`world/` 组负责命名并路由执行世界——会话的文件系统与子进程调用所在的环境（`local`、某个 WSL 发行版、某个 SSH profile）。由四个包交付：`world/` 拥有 `WorldRef` 语法、`WorldBackend` 提供者契约、带内置 local 兜底的 `ctx.worlds` 注册表，以及会话级 `session/world` 记录与其投影；`world-router/` 挂载门面 `ctx.fs`/`ctx.subprocess`，把每次调用委托给拥有它的世界；`world-wsl/` 为每个已安装发行版注册一个 WSL 后端；`world-ssh/` 为每个配置的远端 profile 注册一个 SSH 后端。
 
 ## 目录
 
@@ -27,6 +27,7 @@ kind: "package-group"
 | [`world/`](world/README.zh.md) | 执行世界注册表：`WorldRef` 语法、后端路由、内置 local 后端与会话级世界投影 | `ctx.worlds` |
 | [`world-router/`](world-router/README.zh.md) | 门面 `ctx.fs` / `ctx.subprocess` 提供者，把每次调用委托给拥有其路径或 cwd 的世界 | （实现 `ctx.fs` + `ctx.subprocess`） |
 | [`world-wsl/`](world-wsl/README.zh.md) | WSL 世界后端：每个已安装发行版一个——9P 后备 fs、wsl.exe 子进程、relay 终端 | （注册进 `ctx.worlds`） |
+| [`world-ssh/`](world-ssh/README.zh.md) | SSH 世界后端：每个配置的 profile 一个——池化 shell 帧 fs、远端 bash/grep/glob、ssh -tt 终端 | （注册进 `ctx.worlds`） |
 
 -----
 

@@ -28,7 +28,7 @@
 
 ## 感知世界的工具
 
-模型可见的工具集经工具注册表的亲和接缝（`@deepseek-ai/dsh-tools`）随会话世界变化：定义可声明 `worlds`（`'local'` 或作用于引用的谓词）并作为其名称的一个变体注册；匹配的变体在世界匹配的会话里遮蔽无亲和定义；世界由 `registerWorldResolver` 解析，本包从投影安装该解析器。宿主 shell 工具（`pwsh`、`bash`）声明 `'local'`；WSL 后端用 `wsl:` 谓词注册自己的 `bash`/`grep`/`glob`——WSL 会话看到发行版原生的同名工具，本机会话看到的宿主工具集不变。
+模型可见的工具集经工具注册表的亲和接缝（`@deepseek-ai/dsh-tools`）随会话世界变化：定义可声明 `worlds`（`'local'` 或作用于引用的谓词）并作为其名称的一个变体注册；匹配的变体在世界匹配的会话里遮蔽无亲和定义；世界由 `registerWorldResolver` 解析，本包从投影安装该解析器。宿主 shell 工具（`pwsh`、`bash`）声明 `'local'`；WSL 后端用 `wsl:` 谓词、SSH 后端用 `ssh:` 谓词注册自己的 `bash`/`grep`/`glob`——WSL 或 SSH 会话看到该世界原生的同名工具，本机会话看到的宿主工具集不变。
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

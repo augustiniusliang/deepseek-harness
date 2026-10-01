@@ -28,7 +28,7 @@ A session's world is a log-only `session/world` event written through `setSessio
 
 ## World-aware tools
 
-The model-visible tool set follows the session's world through the tool registry's affinity seam (`@deepseek-ai/dsh-tools`): a definition may declare `worlds` ( `'local'` or a predicate over the reference) and register as a VARIANT of its name, a matching variant shadows the affinity-free definition for the session whose world matches, and the registry resolves the world through `registerWorldResolver`, which this package installs from the projection. The host shell tools (`pwsh`, `bash`) declare `'local'`; the WSL backend registers its own `bash`/`grep`/`glob` with a `wsl:` predicate, so a WSL session sees the distribution-native tools under the same names while a local session sees the host set unchanged.
+The model-visible tool set follows the session's world through the tool registry's affinity seam (`@deepseek-ai/dsh-tools`): a definition may declare `worlds` ( `'local'` or a predicate over the reference) and register as a VARIANT of its name, a matching variant shadows the affinity-free definition for the session whose world matches, and the registry resolves the world through `registerWorldResolver`, which this package installs from the projection. The host shell tools (`pwsh`, `bash`) declare `'local'`; the WSL backend registers its own `bash`/`grep`/`glob` with a `wsl:` predicate and the SSH backend with an `ssh:` predicate, so a WSL or SSH session sees the world-native tools under the same names while a local session sees the host set unchanged.
 
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 

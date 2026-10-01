@@ -247,6 +247,12 @@
         - id: world-wsl
           name: '@deepseek-ai/dsh-world-wsl'
 
+        # SSH worlds: registers one backend per configured SSH profile
+        # (read-only consumption of the remote-ssh settings entry). Silent when
+        # no OpenSSH client or no profile exists.
+        - id: world-ssh
+          name: '@deepseek-ai/dsh-world-ssh'
+
     - id: world-router
       name: '@deepseek-ai/dsh-world-router'
 
