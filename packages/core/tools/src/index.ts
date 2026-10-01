@@ -6,7 +6,7 @@
 
 import { Context, Service } from '@deepseek-ai/cordis'
 import z from '@deepseek-ai/schemastery'
-import { AnonymousEntries, NamedEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
+import { AnonymousEntries, ScopedLayers, scopeOf, scopeTarget } from '@deepseek-ai/dsh-scope'
 import type { ScopeKey, ScopeLayer, Scoped } from '@deepseek-ai/dsh-scope'
 import type { ToolCallId, ContentBlock, ToolSchema } from '@deepseek-ai/dsh-llm'
 import { HarnessError } from '@deepseek-ai/dsh-llm'
@@ -296,6 +296,95 @@ export interface ToolDefinition extends ToolSchema {
    * for the same replay reason.
    */
   presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined
+  /**
+   * Optional execution-world affinity: the worlds this definition may be
+   * visible in, resolved against the calling session's world projection by the
+   * registry's installed world resolver (default: every session is `local`).
+   * `'local'` is sugar for visibility in the local world alone; a predicate
+   * names any other set (e.g. `w => w.startsWith('wsl:')`). Omission means
+   * visible in every world. Definitions WITH an affinity are variants of
+   * their name: a matching variant shadows the affinity-free definition for
+   * the session whose world matches, and a name with no matching variant and
+   * no affinity-free definition is hidden.
+   */
+  worlds?: WorldAffinity
+}
+
+/**
+ * One tool definition's execution-world affinity: `'local'` (the host world
+ * only) or a predicate over the session's world reference
+ * (`'local' | 'wsl:<distro>[:<user>]' | 'ssh:<profileId>'`).
+ */
+export type WorldAffinity = 'local' | ((world: string) => boolean)
+
+/** Resolve an affinity against one world reference. */
+function affinityMatches(affinity: WorldAffinity, world: string): boolean {
+  return affinity === 'local' ? world === 'local' : affinity(world)
+}
+
+/** One world-affinity variant registration: the definition and the affinity it answers. */
+interface AffinityVariant {
+  readonly definition: ToolDefinition
+  readonly affinity: WorldAffinity
+}
+
+/** One name's registrations in a layer: the affinity-free base plus world-affinity variants. */
+interface AffinityToolGroup {
+  base?: ToolDefinition
+  readonly variants: AffinityVariant[]
+}
+
+/**
+ * Insertion-ordered tool storage keyed by name, holding one affinity-free
+ * base and any number of world-affinity variants per name. A second
+ * affinity-free registration of one name is the duplicate error the tool
+ * registry has always thrown; variants never collide by name.
+ */
+class AffinityToolEntries {
+  private readonly groups = new Map<string, AffinityToolGroup>()
+
+  constructor(
+    private readonly duplicateError: (name: string) => Error,
+  ) {}
+
+  /**
+   * Insert one definition under its name.
+   * @param name - the tool name.
+   * @param definition - the definition; `worlds` decides base vs variant.
+   * @returns an idempotent undo removing exactly this definition.
+   */
+  insert(name: string, definition: ToolDefinition): () => void {
+    const group = this.groups.get(name) ?? { variants: [] }
+    if (definition.worlds === undefined) {
+      if (group.base !== undefined) throw this.duplicateError(name)
+      group.base = definition
+    } else {
+      group.variants.push({ definition, affinity: definition.worlds })
+    }
+    this.groups.set(name, group)
+    let active = true
+    return () => {
+      if (!active) return
+      active = false
+      if (definition.worlds === undefined) {
+        if (group.base === definition) delete group.base
+      } else {
+        const index = group.variants.findIndex(variant => variant.definition === definition)
+        if (index >= 0) group.variants.splice(index, 1)
+      }
+      if (group.base === undefined && group.variants.length === 0) this.groups.delete(name)
+    }
+  }
+
+  /** Every name group, in first-insertion order. */
+  groupsInOrder(): IterableIterator<[string, AffinityToolGroup]> {
+    return this.groups.entries()
+  }
+
+  /** Whether no definition is held. */
+  isEmpty(): boolean {
+    return this.groups.size === 0
+  }
 }
 
 /** The completed outcome handed to {@link ToolDefinition.presentResult}. */
@@ -732,7 +821,7 @@ export type ToolGuard = (execution: Readonly<ToolExecution>) => string | undefin
 
 /** One scope's complete tool-registry contribution. */
 class ToolLayer implements ScopeLayer {
-  readonly tools: NamedEntries<ToolDefinition>
+  readonly tools: AffinityToolEntries
   readonly restrictions = new AnonymousEntries<CompiledToolRestriction>()
   readonly guards = new AnonymousEntries<ToolGuard>()
   /**
@@ -743,7 +832,7 @@ class ToolLayer implements ScopeLayer {
   mode: ToolPresentationMode | undefined
 
   constructor(scope: ScopeKey | undefined) {
-    this.tools = new NamedEntries(name => new Error(scope === undefined
+    this.tools = new AffinityToolEntries(name => new Error(scope === undefined
       ? `tool "${name}" is already registered (for a per-agent variant, register through that agent's \`agent.ctx\` instead)`
       : `tool "${name}" is already registered in this scope`))
   }
@@ -844,6 +933,13 @@ export class ToolRuntime extends Service {
    * transport is stateless beyond its closures over `this`.
    */
   private ptcTransport: ToolDefinition | undefined
+  /**
+   * The world affinity resolver for the visibility filter: maps the viewing
+   * scope (the agent) to its session's world reference. The execution-world
+   * registry package installs it; before then every scope is `local`, so an
+   * affinity-free composition behaves exactly as before.
+   */
+  private worldResolver: (scope: ScopeKey | undefined) => string = () => 'local'
 
   constructor(ctx: Context, config: Config = {}) {
     super(ctx, 'tools')
@@ -1074,6 +1170,10 @@ export class ToolRuntime extends Service {
       && (!Number.isFinite(timeoutMs) || timeoutMs <= 0)) {
       throw new TypeError(`tool "${name}" timeoutMs must be a positive finite number`)
     }
+    const worlds = definition.worlds
+    if (worlds !== undefined && worlds !== 'local' && typeof worlds !== 'function') {
+      throw new TypeError(`tool "${name}" worlds must be "local" or a (world: string) => boolean predicate`)
+    }
     // Reserved unconditionally: any agent may select a code mode for itself,
     // so a name free to take under the deployment default would become a
     // collision the moment a preset mounted.
@@ -1085,6 +1185,23 @@ export class ToolRuntime extends Service {
       layer => layer.tools.insert(name, definition),
       { label: 'tools.register()' },
     )
+  }
+
+  /**
+   * Install the execution-world resolver the affinity filter reads: maps the
+   * viewing scope (the agent) to its session's world reference. One resolver
+   * at a time; the execution-world registry owns the production installation.
+   * @param resolver - scope → world reference.
+   * @returns the exact disposer restoring the default (every scope `local`).
+   */
+  registerWorldResolver(resolver: (scope: ScopeKey | undefined) => string): () => void {
+    const previous = this.worldResolver
+    this.worldResolver = resolver
+    this.ctx.emit('tools/change')
+    return () => {
+      this.worldResolver = previous
+      this.ctx.emit('tools/change')
+    }
   }
 
   /**
@@ -1183,11 +1300,28 @@ export class ToolRuntime extends Service {
     // contributes something.
     const own = this.layers.peek(scope)
     // Inherited surface, nearest ancestor last: a nearer scope's same-name
-    // entry shadows a farther one, and the global layer is the farthest.
-    const inherited = new Map<string, ToolDefinition>(this.layers.global.tools.entries())
+    // base shadows a farther one, and the global layer is the farthest.
+    // World-affinity variants do NOT shadow across layers: every layer's
+    // variants stay candidates, nearer layers first so a nearer variant wins
+    // a matching world.
+    const world = this.worldResolver(scope)
+    const bases = new Map<string, ToolDefinition>()
+    const variants: AffinityVariant[] = []
+    const collect = (toolEntries: AffinityToolEntries): void => {
+      for (const [name, group] of toolEntries.groupsInOrder()) {
+        if (group.base !== undefined) bases.set(name, group.base)
+        variants.push(...group.variants)
+      }
+    }
+    collect(this.layers.global.tools)
     for (const layer of layers) {
       if (layer === own) continue
-      for (const [name, definition] of layer.tools.entries()) inherited.set(name, definition)
+      collect(layer.tools)
+    }
+    const inherited = new Map<string, ToolDefinition>()
+    for (const [name, base] of bases) inherited.set(name, base)
+    for (const variant of variants) {
+      if (affinityMatches(variant.affinity, world)) inherited.set(variant.definition.name, variant.definition)
     }
     const visible = new Map<string, ToolDefinition>()
     const knownNames = new Set<string>()
@@ -1200,9 +1334,16 @@ export class ToolRuntime extends Service {
       if (layers.every(layer => layer.admits(name))) visible.set(name, definition)
     }
     // The scope's own registrations last, shadowing an inherited name and
-    // outside the filter above.
+    // outside the filter above; affinity selection applies identically.
     if (own !== undefined) {
-      for (const [name, definition] of own.tools.entries()) {
+      const ownBases = new Map<string, ToolDefinition>()
+      for (const [name, group] of own.tools.groupsInOrder()) {
+        if (group.base !== undefined) ownBases.set(name, group.base)
+        for (const variant of group.variants) {
+          if (affinityMatches(variant.affinity, world)) ownBases.set(name, variant.definition)
+        }
+      }
+      for (const [name, definition] of ownBases) {
         knownNames.add(name)
         visible.set(name, definition)
       }

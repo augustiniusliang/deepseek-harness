@@ -9,7 +9,7 @@ kind: "package-reference"
 
 ## 概述
 
-`dsh-tool-bash` 运行 Bash 命令并返回 stdout、stderr 与退出标记。每次调用使用全新 shell；cwd、变量和函数不会保留。组合中有 job 注册表时，每条命令从启动起就是一个 job：`run_in_background` 立即返回 id，超过超时仍在运行的前台命令返回同一个 id，`job_output`/`job_kill` 收集并停止它。命令获得受管 `DSH_*` 环境；沙箱拒绝可携带更宽的 `sandbox_permissions`、一句 `justification` 与用户批准重试一次。非零退出是供 agent（智能体）解读的结果。请将 `dsh-bash-local` 或 `dsh-bash-sandbox` 等执行器与 `dsh-shell-env` 一起挂载。
+`dsh-tool-bash` 运行 Bash 命令并返回 stdout、stderr 与退出标记。每次调用使用全新 shell；cwd、变量和函数不会保留。组合中有 job 注册表时，每条命令从启动起就是一个 job：`run_in_background` 立即返回 id，超过超时仍在运行的前台命令返回同一个 id，`job_output`/`job_kill` 收集并停止它。命令获得受管 `DSH_*` 环境；沙箱拒绝可携带更宽的 `sandbox_permissions`、一句 `justification` 与用户批准重试一次。非零退出是供 agent（智能体）解读的结果。请将 `dsh-bash-local` 或 `dsh-bash-sandbox` 等执行器与 `dsh-shell-env` 一起挂载。本工具声明 `local` 执行世界亲和：运行在非本机世界（WSL 发行版、SSH profile）的会话看不到它——那个世界会注册自己的 bash 工具。
 
 ## 目录
 

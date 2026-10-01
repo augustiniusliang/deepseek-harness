@@ -30,6 +30,21 @@
       "path": "../../subprocess/subprocess"
     },
     {
+      "path": "../../fs/tool-fs-search"
+    },
+    {
+      "path": "../../spill/spill"
+    },
+    {
+      "path": "../../util/output-retention"
+    },
+    {
+      "path": "../../util/timeout"
+    },
+    {
+      "path": "../../core/tools"
+    },
+    {
       "path": "../world"
     }
   ]

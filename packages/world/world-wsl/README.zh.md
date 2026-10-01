@@ -63,6 +63,8 @@ subprocess 后端翻译每次 spawn：cwd（UNC → Linux，盘符 → `/mnt/<dr
 | [`src/index.ts`](src/index.ts) | `createWslWorldBackend` 工厂、relay 路径解析与优雅降级的插件入口 |
 | [`src/fs.ts`](src/fs.ts) | `WslFileSystem`：UNC/Linux/盘符翻译、符号链接回退、策略再围栏 |
 | [`src/subprocess.ts`](src/subprocess.ts) | `WslSubprocessRuntime`：spawn/terminal 翻译、可执行文件探针、宿主二进制 9P 回退 |
+| [`src/tools-bash.ts`](src/tools-bash.ts) | 本世界的 `bash` 工具：会话发行版内 `bash -lc`，输出对齐宿主工具 |
+| [`src/tools-search.ts`](src/tools-search.ts) | 本世界的 `grep`/`glob` 工具：发行版内 GNU grep/find 引擎，schema/渲染/卡片对齐宿主套件 |
 | [`src/relay.ts`](src/relay.ts) | 独立的持久 shell relay（作为 PTY 进程运行） |
 | [`src/paths.ts`](src/paths.ts) | UNC/drvfs 路径语法（纯函数） |
 | [`src/wsl.ts`](src/wsl.ts) | 发行版发现（`wsl.exe -l -q`、Lxss 注册表默认项） |
@@ -90,11 +92,11 @@ fs、路径、凭据与 relay 各部分移植自 [dsh-wsl-workspace 0.7.3](https
 <a id="model-experience"></a>
 ## 模型体验
 
-间接地：世界路由把工具消费方的调用委托到这里；本后端只改变调用在哪里执行，从不改变模型被告知的任何内容。
+间接地：通过本世界自有的 `bash`/`grep`/`glob` 工具——名称、参数 schema、上限、输出渲染与搜索卡片逐字节对齐宿主套件（`dsh-tool-bash`、`dsh-tool-fs-search`）——模型看到同一份契约，只是执行发生在发行版内。在 WSL 会话中，这些定义经工具注册表的世界亲和过滤以同名遮蔽宿主工具。
 
 #### KV Cache 影响
 
-无；不新增 prompt、schema 或会话事件。
+WSL 会话的工具目录会把宿主 shell 与搜索工具换成同名等价物；目录其余部分不变，本机会话的请求前缀与未装本包的组合逐字节一致。
 
 ## 已知限制与延后工作
 
@@ -102,7 +104,8 @@ fs、路径、凭据与 relay 各部分移植自 [dsh-wsl-workspace 0.7.3](https
 
 这些限制界定本包提供的 WSL 世界。它们是当前的包约束，不是任务清单。
 
-- **搜索工具走 9P 回退**——grep/glob 用随包的 Windows ripgrep 爬 UNC 共享（功能正确，慢于发行版内引擎）；发行版内替代等待 tool-fs-search 长出按世界分派的 search 接缝。
+- **本世界的 `bash` 仅前台**——后台任务与沙箱升权字段留给宿主工具；WSL 会话的命令在本世界自己的 fs 围栏下运行（`enforcement: 'partial'`），没有升权方言。`bash_background` 桥接属延后工作。
+- **GNU grep 不支持 gitignore**——发行版内 `grep` 显式排除隐藏项与 `node_modules`，但仍搜索被 git 忽略的文件；超大工作区的全树内容搜索仍可能触及协作超时，与宿主引擎同界。
 - **杀 wsl.exe 不是 POSIX 信号**——终止一次性句柄只结束启动器；内部进程的命运由发行版决定（沿袭上游插件语义）。
 - **后端在发现完成后注册**——注册完成前已初始化世界投影的会话，在下一次读取时按 cwd 重新检测；`wsl.exe -l -q` 的延迟落在插件加载路径上。
 - **凭据库写入没有 UI**——`registerWindowsWorkspace`/`setWorkspaceUsername` 是编程接缝；web 工作区对话框留给 vendored 插件。

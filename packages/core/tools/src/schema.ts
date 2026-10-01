@@ -3,7 +3,7 @@
 import { HarnessError } from '@deepseek-ai/dsh-llm'
 import type { ContentBlock } from '@deepseek-ai/dsh-llm'
 import type { JsonValue } from '@deepseek-ai/dsh-util-values'
-import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRunContext, ToolResult } from './index.ts'
+import type { ToolDefinition, ToolExecution, ToolExecutionResult, ToolRunContext, ToolResult, WorldAffinity } from './index.ts'
 import { assertSupportedJsonSchema, isJsonSchemaRecord, isPlainJsonArray, JsonSchemaError, validateJsonSchemaValue } from './json-schema.ts'
 import type { JsonSchemaNode, JsonSchemaScalar, ObjectJsonSchema } from './json-schema.ts'
 import type { ToolCallView, ToolResultView } from './presentation.ts'
@@ -501,6 +501,11 @@ export interface DefineToolOptions<S extends ParameterSchemaSpec, O extends Valu
   /** Optional positive cooperative timeout budget in milliseconds. */
   readonly timeoutMs?: number
   /**
+   * Optional execution-world affinity; forwarded to {@link ToolDefinition.worlds}
+   * verbatim. Omission means visible in every world.
+   */
+  readonly worlds?: WorldAffinity
+  /**
    * Pure classifier for sibling overlap.
    * @param args - typed validated arguments.
    * @returns Whether the call may join a parallel group.
@@ -594,6 +599,7 @@ export function defineTool<const S extends ParameterSchemaSpec, const O extends 
     },
     ...(options.deferLoading === true ? { deferLoading: options.deferLoading } : {}),
     ...(options.timeoutMs !== undefined ? { timeoutMs: options.timeoutMs } : {}),
+    ...(options.worlds !== undefined ? { worlds: options.worlds } : {}),
     async execute(args: unknown, exec: ToolRunContext): Promise<JsonValue> {
       const violations = validate(args)
       if (violations.length > 0) throw new ToolArgsError(violations)

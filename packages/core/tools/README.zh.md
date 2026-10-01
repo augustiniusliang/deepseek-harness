@@ -80,6 +80,10 @@ ctx.tools.register(defineTool({
 
 `ctx.tools.restrict(filter)` 对单个 agent 继承的全局工具应用允许或拒绝掩码；掩码取交集，作用域注册保持可见，限制在 dispose（资源释放）时解除。`ctx.tools.get(name, scope)` 按一个作用域的视角解析工具。使用 Host 本地展示转换器的消费方如需匹配实际执行的定义，会传入发起调用的 agent。`ctx.tools.schemas(scope)` 返回可见 schema（不含 `execute` 函数）。
 
+### 按执行世界限制工具
+
+定义可声明 `worlds`——`'local'` 或一个作用于会话世界引用（`'local'`、`'wsl:<distro>[:<user>]'、`'ssh:<profileId>'`）的谓词——从而成为其名称的一个变体：一个名称下可有零或一个无亲和定义加任意多个变体；匹配的变体在世界匹配的会话里遮蔽无亲和定义；既无匹配变体又无无亲和定义的名称被隐藏。注册表通过 `registerWorldResolver` 安装的解析器解析每个查看 agent 的世界（执行世界注册表包负责安装；默认对每个作用域回答 `local`，因此无亲和的组合行为与之前完全一致）。可见性判定发生在 prompt 组装与派发共用的同一个 `view()` 中，模型看到的目录与实际可执行的定义绝不会不一致。
+
 ### 对调用实施策略
 
 `ctx.tools.guard(guard)` 在可扩展的 `tools/pre-execute` waterfall（瀑布式事件）之后注册单调同步守卫：返回的理由会拒绝调用，后续监听器无法把该拒绝重新变为允许。流水线事件给插件更多控制——`tools/pre-execute` 决定允许／拒绝／询问，`tools/execute` 为超时或重试包装分发，`tools/post-execute` 检查或替换结果，`tools/result` 观测冻结的最终结果。

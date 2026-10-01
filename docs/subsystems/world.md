@@ -26,6 +26,10 @@ Registration order is routing priority. `resolve({ path, cwd })` prefers the fir
 
 A session's world is a log-only `session/world` event written through `setSessionWorld(session, ref)`; the fold replaces rather than accumulates, so the last event is the session's world. The `world` projection initializes from the world detected from the session's immutable creation cwd — a session created inside a WSL tree starts there without any event — and exposes the folded reference as a client-visible wire value. The package's invariant companion rejects a forged `session/world` payload that fails the reference grammar, both on loaded history and on live appends.
 
+## World-aware tools
+
+The model-visible tool set follows the session's world through the tool registry's affinity seam (`@deepseek-ai/dsh-tools`): a definition may declare `worlds` ( `'local'` or a predicate over the reference) and register as a VARIANT of its name, a matching variant shadows the affinity-free definition for the session whose world matches, and the registry resolves the world through `registerWorldResolver`, which this package installs from the projection. The host shell tools (`pwsh`, `bash`) declare `'local'`; the WSL backend registers its own `bash`/`grep`/`glob` with a `wsl:` predicate, so a WSL session sees the distribution-native tools under the same names while a local session sees the host set unchanged.
+
 <!-- BEGIN GENERATED cordis-surface (gen-cordis-catalog.ts) — do not edit between markers -->
 
 <a id="cordis-surface"></a>

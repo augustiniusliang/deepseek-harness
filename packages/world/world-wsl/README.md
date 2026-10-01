@@ -63,6 +63,8 @@ The subprocess backend translates each spawn: cwd (UNC → Linux, drive → `/mn
 | [`src/index.ts`](src/index.ts) | `createWslWorldBackend` factory, relay-path resolution, and the graceful-degrading plugin entry |
 | [`src/fs.ts`](src/fs.ts) | `WslFileSystem`: UNC/Linux/drive translation, symlink fallback, policy re-fence |
 | [`src/subprocess.ts`](src/subprocess.ts) | `WslSubprocessRuntime`: spawn/terminal translation, executable probes, host-binary 9P fallback |
+| [`src/tools-bash.ts`](src/tools-bash.ts) | The world's `bash` tool: `bash -lc` inside the session's distribution, host-aligned output |
+| [`src/tools-search.ts`](src/tools-search.ts) | The world's `grep`/`glob` tools: GNU grep/find engine inside the distribution, host-aligned schemas, rendering, and cards |
 | [`src/relay.ts`](src/relay.ts) | Standalone persistent-shell relay (run as the PTY process) |
 | [`src/paths.ts`](src/paths.ts) | UNC/drvfs path grammar (pure) |
 | [`src/wsl.ts`](src/wsl.ts) | Distribution discovery (`wsl.exe -l -q`, Lxss registry default) |
@@ -90,11 +92,11 @@ Read these pages for the registry this backend registers into and the facades th
 <a id="model-experience"></a>
 ## Model Experience
 
-Indirectly, through the tool consumers whose calls the world router delegates here; the backend changes WHERE calls execute, never what the model is told.
+Indirectly, through the world's own `bash`/`grep`/`glob` tools, whose names, parameter schemas, caps, output rendering, and search cards mirror the host suite (`dsh-tool-bash`, `dsh-tool-fs-search`) verbatim — the model sees the same contract, executed inside the distribution. In a WSL session these definitions shadow the host tools under the same names through the tool registry's world-affinity filter.
 
 #### KV Cache effect
 
-None; no prompt, schema, or session event is added.
+In a WSL session the tool catalog swaps the host shell and search tools for same-named equivalents; the rest of the catalog is untouched, and a local session's request prefix is byte-identical to a composition without this package.
 
 ## Known Limitations and Deferred Work
 
@@ -102,7 +104,8 @@ None; no prompt, schema, or session event is added.
 
 These limits define the WSL world this package provides. They are current package constraints, not a task backlog.
 
-- **Search tools ride the 9P fallback** — grep/glob run the bundled Windows ripgrep against the UNC share (functionally correct, slower than an in-distro engine); the in-distro replacement waits on a per-world search seam in tool-fs-search.
+- **The world's `bash` is foreground-only** — background jobs and sandbox-escalation fields stay with the host tool; a WSL session's commands run under the world's own fs fence (`enforcement: 'partial'`), which has no escalation dialect. `bash_background` bridging is deferred.
+- **GNU grep has no gitignore support** — the in-distro `grep` excludes hidden entries and `node_modules` explicitly but searches git-ignored files; a whole-tree content search over a very large workspace can still hit the cooperative timeout, the same bound the host engine has.
 - **Killing wsl.exe is not POSIX signalling** — terminating a one-shot handle ends the launcher; the distribution decides the inner process's fate (inherited from the upstream plugin's semantics).
 - **Backends register after discovery completes** — a session whose world projection initialized before registration settles at its cwd's detected world on the next read; `wsl.exe -l -q` latency lives on the plugin load path.
 - **Credential-store writes have no UI here** — `registerWindowsWorkspace`/`setWorkspaceUsername` are the programmatic seam; the web workspace dialog stays with the vendored plugin.

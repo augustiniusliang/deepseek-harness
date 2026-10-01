@@ -7,14 +7,18 @@
 
 import { describe, expect, it } from 'vitest'
 import { Context } from '@deepseek-ai/cordis'
-import { SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
+import SessionStore, { SESSION_FORMAT_VERSION, Session, SessionId, SessionLogOffset } from '@deepseek-ai/dsh-session'
 import type { SessionEvent } from '@deepseek-ai/dsh-session'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import { FileSystem } from '@deepseek-ai/dsh-fs'
 import type { FsTarget } from '@deepseek-ai/dsh-fs'
 import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
 import { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type { SubprocessHandle, SubprocessSpawnSpec, SubprocessTerminalHandle, SubprocessTerminalSpawnSpec } from '@deepseek-ai/dsh-subprocess'
+import SystemPrompt from '@deepseek-ai/dsh-system-prompt'
+import ToolRuntime from '@deepseek-ai/dsh-tools'
+import type { ToolDefinition } from '@deepseek-ai/dsh-tools'
 import WorldRegistry, { formatWorldRef, isWorldRef, parseWorldRef, setSessionWorld } from '@deepseek-ai/dsh-world'
 import type { WorldBackend, WorldRef } from '@deepseek-ai/dsh-world'
 
@@ -266,5 +270,38 @@ describe('sandbox-policy path claim', () => {
     expect(() => ctx.sandboxPolicy.resolve({ session: remote })).toThrow(
       'sandbox-policy: workspace root must be an absolute execution-world path',
     )
+  })
+})
+
+describe('tool world resolver', () => {
+  it('resolves the viewing agent session world into the tool affinity filter', async () => {
+    const ctx = new Context()
+    await ctx.plugin(SessionStore)
+    await ctx.plugin(SessionProjectionRegistry)
+    await ctx.plugin(SystemPrompt)
+    await ctx.plugin(ToolRuntime)
+    await ctx.plugin(WorldRegistry)
+    const definition = (reply: string, worlds?: 'local'): ToolDefinition => ({
+      name: `shell-${reply}`,
+      description: reply,
+      parameters: { type: 'object', properties: {} },
+      output: { schema: { type: 'string' }, render: (_args, value) => [{ type: 'text', text: value as string }] },
+      ...worlds === undefined ? {} : { worlds },
+      execute: () => Promise.resolve(reply),
+    })
+    ctx.tools.register(definition('host-only', 'local'))
+    ctx.tools.register(definition('everywhere'))
+
+    const sessionId = SessionId('sess-view')
+    const session = ctx.sessions.create(sessionId, { meta: { cwd: '/home/u/project' } })
+    const agent = { session } as unknown as Agent
+    expect(ctx.tools.get('shell-host-only', agent)).toBeDefined()
+
+    setSessionWorld(session, 'wsl:Ubuntu')
+    expect(ctx.tools.get('shell-host-only', agent)).toBeUndefined()
+    expect(ctx.tools.get('shell-everywhere', agent)).toBeDefined()
+
+    setSessionWorld(session, 'local')
+    expect(ctx.tools.get('shell-host-only', agent)).toBeDefined()
   })
 })

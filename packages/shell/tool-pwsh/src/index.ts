@@ -381,6 +381,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     return defineTool({
       name: 'pwsh',
       description: pwshDescription(escalationModes.length > 0),
+      // Host-shell tool: hidden when the session runs in a non-local world
+      // (that world registers its own shell tool).
+      worlds: 'local',
       /* jscpd:ignore-start -- deliberate mirror of dsh-tool-bash's parameter surface (pwsh-tool-and-executor Agent Note). */
       parameters: {
         command: { type: 'string', required: true, description: 'The PowerShell command to execute.' },

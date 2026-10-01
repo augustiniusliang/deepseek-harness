@@ -80,6 +80,10 @@ The generated [configuration catalog](../../../docs/config-catalog.md#deepseek-a
 
 `ctx.tools.restrict(filter)` applies an allow or deny mask to the global tools one agent inherits; masks intersect, scoped registrations stay visible, and the restriction lifts when disposed. `ctx.tools.get(name, scope)` resolves a tool as one scope sees it. A Host-local presenter consumer passes the calling agent when it must match the definition that executed. `ctx.tools.schemas(scope)` returns the visible schemas without the `execute` functions.
 
+### Restrict tools per execution world
+
+A definition may declare `worlds` — `'local'` or a predicate over the session's world reference (`'local'`, `'wsl:<distro>[:<user>]'`, `'ssh:<profileId>'`) — making it a VARIANT of its name: one name holds the affinity-free definition plus any number of variants, a matching variant shadows the affinity-free one for the session whose world matches, and a name with no match and no affinity-free definition is hidden. The registry resolves each viewing agent's world through the resolver installed with `registerWorldResolver` (the execution-world registry package installs it; the default answers `local` for every scope, so an affinity-free composition behaves exactly as before). Visibility is decided in the same `view()` that prompt assembly and dispatch share, so the model's catalog and the executable definition can never disagree.
+
 ### Enforce policy on calls
 
 `ctx.tools.guard(guard)` registers a monotonic synchronous guard after the extensible `tools/pre-execute` waterfall: a returned reason denies the call, and no later listener can turn that denial back into permission. The pipeline's events give plugins more control — `tools/pre-execute` decides allow/deny/ask, `tools/execute` wraps dispatch for timeout or retry, `tools/post-execute` inspects or replaces the result, and `tools/result` observes the frozen final outcome.

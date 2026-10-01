@@ -100,6 +100,18 @@ interface ToolDefinition extends ToolSchema {
    * for the same replay reason.
    */
   presentResult?(args: unknown, result: ToolResult): ToolResultView | undefined
+  /**
+   * Optional execution-world affinity: the worlds this definition may be
+   * visible in, resolved against the calling session's world projection by the
+   * registry's installed world resolver (default: every session is `local`).
+   * `'local'` is sugar for visibility in the local world alone; a predicate
+   * names any other set (e.g. `w => w.startsWith('wsl:')`). Omission means
+   * visible in every world. Definitions WITH an affinity are variants of
+   * their name: a matching variant shadows the affinity-free definition for
+   * the session whose world matches, and a name with no matching variant and
+   * no affinity-free definition is hidden.
+   */
+  worlds?: WorldAffinity
 }
 ```
 
@@ -528,6 +540,15 @@ presentAs(mode: ToolPresentationMode): () => void
  * @returns the exact disposer that unregisters the tool.
  */
 register(definition: ToolDefinition): () => void
+
+/**
+ * Install the execution-world resolver the affinity filter reads: maps the
+ * viewing scope (the agent) to its session's world reference. One resolver
+ * at a time; the execution-world registry owns the production installation.
+ * @param resolver - scope → world reference.
+ * @returns the exact disposer restoring the default (every scope `local`).
+ */
+registerWorldResolver(resolver: (scope: ScopeKey | undefined) => string): () => void
 
 /**
  * Restrict global tools for the calling agent scope. Empty filters, unknown

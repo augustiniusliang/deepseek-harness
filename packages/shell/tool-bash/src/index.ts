@@ -371,6 +371,9 @@ export function apply(ctx: Context, config: Config = {}): void {
     return defineTool({
       name: 'bash',
       description: bashDescription(),
+      // Host-shell tool: hidden when the session runs in a non-local world
+      // (that world registers its own bash tool).
+      worlds: 'local',
       parameters: {
         command: { type: 'string', required: true, description: 'The bash command to execute.' },
         description: {

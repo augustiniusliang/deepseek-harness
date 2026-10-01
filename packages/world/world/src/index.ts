@@ -18,10 +18,13 @@
 import { Context, Service } from '@deepseek-ai/cordis'
 import { z as zod } from 'zod'
 import type { FileSystem } from '@deepseek-ai/dsh-fs'
+import type { Agent } from '@deepseek-ai/dsh-agent'
 import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
+import type { ScopeKey } from '@deepseek-ai/dsh-scope'
+import type {} from '@deepseek-ai/dsh-tools'
 import { LOCAL_WORLD_REF, isWorldRef, parseWorldRef } from './ref.ts'
 import type { WorldRef } from './types.ts'
 
@@ -116,6 +119,19 @@ export class WorldRegistry extends Service {
     ctx.inject(['sandboxPolicy'], (scope: Context) => {
       scope.effect(() => scope.sandboxPolicy.registerPathClaim(path => this.claiming(path) !== undefined))
     })
+
+    // Optional wiring: the tool registry's world-affinity visibility filter
+    // resolves the session world through this registry's projection.
+    ctx.inject(['tools'], (scope: Context) => {
+      scope.effect(() => scope.tools.registerWorldResolver(viewing => this.worldForScope(viewing)))
+    })
+  }
+
+  /** The viewing agent's session world for the tool registry's affinity filter. */
+  private worldForScope(viewing: ScopeKey | undefined): WorldRef {
+    const session = (viewing as Agent | undefined)?.session
+    if (session === undefined) return LOCAL_WORLD_REF
+    return this.homeCtx.sessionProjections.stateOf(session, 'world') ?? LOCAL_WORLD_REF
   }
 
   /**

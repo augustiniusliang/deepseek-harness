@@ -24,6 +24,8 @@ import { getWindowsWorkspace, getWorkspaceUsername } from './credentials.ts'
 import { WslFileSystem } from './fs.ts'
 import { isWslUnc, parseWslUnc } from './paths.ts'
 import { WslSubprocessRuntime } from './subprocess.ts'
+import { registerWslBashTool } from './tools-bash.ts'
+import { registerWslSearchTools } from './tools-search.ts'
 import { listDistros } from './wsl.ts'
 
 export { WslFileSystem } from './fs.ts'
@@ -181,6 +183,15 @@ export function apply(ctx: Context): void {
         policyScope.effect(() => policyScope.sandboxPolicy.registerPathClaim(
           path => isWslUnc(path) || getWindowsWorkspace(path) !== undefined,
         ))
+      })
+      // The world's model-facing tools: bash/grep/glob, visible only in WSL
+      // sessions through the registry's world-affinity filter.
+      scope.inject(['tools'], (toolScope) => {
+        toolScope.effect(() => {
+          registerWslBashTool(toolScope)
+          registerWslSearchTools(toolScope)
+          return () => {}
+        })
       })
     })()
   })
