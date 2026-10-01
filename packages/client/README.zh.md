@@ -72,6 +72,7 @@ kind: "package-group"
 | [`ui-settings-plugins/`](ui-settings-plugins/README.zh.md) | 负责「内置插件」设置分区壳及其标签页扩展点 | — |
 | [`ui-user-questions/`](ui-user-questions/README.zh.md) | 展示 agent 请求的交互式问题 | — |
 | [`ui-agent-preset/`](ui-agent-preset/README.zh.md) | 选择会话的 agent 预设并编写预设组合 | — |
+| [`ui-session-world/`](ui-session-world/README.zh.md) | 以只读头部 chip 显示会话的执行世界 | — |
 | [`ui-settings/`](ui-settings/README.zh.md) | 承载设置界面及其扩展区域 | — |
 | [`ui-settings-general/`](ui-settings-general/README.zh.md) | 提供常规设置分区 | — |
 | [`ui-settings-models/`](ui-settings-models/README.zh.md) | 提供模型提供方配置与 DeepSeek 引导 | — |

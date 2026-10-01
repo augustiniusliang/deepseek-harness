@@ -3,8 +3,8 @@
 # After editing either side, bring the other along and re-record with:
 #   pnpm run verify-translation-pairing --write docs/subsystems/world.md
 /execution-worlds:
-  en: 471a28cb37c82a42
-  zh: 8c6e9795cc889178
+  en: a0956b5bc4d1f887
+  zh: 754f5d781e900046
 /execution-worlds/the-facade-and-the-realm-layout:
   en: b483319d28a24e79
   zh: 1133903b5c41b6be

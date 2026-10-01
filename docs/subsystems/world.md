@@ -2,7 +2,7 @@
 
 English | [中文](world.zh.md)
 
-An execution world is one coherent filesystem + subprocess pair a session's capability calls run in: the Harness host itself (`local`), a WSL distribution, or an SSH profile. The world registry's Service Definition is [dsh-world](../../packages/world/world/README.md) (`ctx.worlds`); world providers register plain backend objects, and the registry resolves a path or cwd to the backend that owns it. The registry ships one built-in backend — the local fallback wrapping the composition's mounted `ctx.fs`/`ctx.subprocess` — and claims nothing by itself.
+An execution world is one coherent filesystem + subprocess pair a session's capability calls run in: the Harness host itself (`local`), a WSL distribution, or an SSH profile. The world registry's Service Definition is [dsh-world](../../packages/world/world/README.md) (`ctx.worlds`); world providers register plain backend objects, and the registry resolves a path or cwd to the backend that owns it. The registry ships one built-in backend — the local fallback wrapping the composition's mounted `ctx.fs`/`ctx.subprocess` — and claims nothing by itself; [dsh-world-wsl](../../packages/world/world-wsl/README.md) registers one backend per installed WSL distribution and [dsh-world-ssh](../../packages/world/world-ssh/README.md) one per configured SSH profile.
 
 Source: [`packages/world/world/src/index.ts`](../../packages/world/world/src/index.ts)
 

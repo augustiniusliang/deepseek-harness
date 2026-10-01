@@ -2,7 +2,7 @@
 
 [English](world.md) | 中文
 
-执行世界是会话能力调用运行所在的、自洽的文件系统 + 子进程对：Harness 宿主机本身（`local`）、一个 WSL 发行版，或一个 SSH profile。世界注册表的服务定义是 [dsh-world](../../packages/world/world/README.zh.md)（`ctx.worlds`）；世界提供者注册纯后端对象，注册表把路径或 cwd 解析到拥有它的后端。注册表内置一个后端——包装组合中已挂载 `ctx.fs`/`ctx.subprocess` 的 local 兜底——自身不认领任何路径。
+执行世界是会话能力调用运行所在的、自洽的文件系统 + 子进程对：Harness 宿主机本身（`local`）、一个 WSL 发行版，或一个 SSH profile。世界注册表的服务定义是 [dsh-world](../../packages/world/world/README.zh.md)（`ctx.worlds`）；世界提供者注册纯后端对象，注册表把路径或 cwd 解析到拥有它的后端。注册表内置一个后端——包装组合中已挂载 `ctx.fs`/`ctx.subprocess` 的 local 兜底——自身不认领任何路径；[dsh-world-wsl](../../packages/world/world-wsl/README.zh.md) 为每个已安装 WSL 发行版注册一个后端，[dsh-world-ssh](../../packages/world/world-ssh/README.zh.md) 为每个配置的 SSH profile 注册一个后端。
 
 来源：[`packages/world/world/src/index.ts`](../../packages/world/world/src/index.ts)
 
