@@ -231,6 +231,18 @@ resolve(request: SandboxPolicyRequest = {}): SandboxExecutionPolicy
 registerPathClaim(claim: (path: string) => boolean): () => void
 
 /**
+ * Whether any registered execution world claims a path. Confinement
+ * providers read this to pass world-owned commands through unwrapped: a
+ * host runner cannot fence a kernel it does not share (the Windows ACL
+ * runner cannot even read a 9P path's security), so a claimed workspace
+ * root runs `enforcement: 'partial'` — the world's own fs fence stays the
+ * file-effect boundary.
+ * @param path - the absolute path to test (a policy's workspace root).
+ * @returns true when a registered world claims the path.
+ */
+worldClaims(path: string): boolean
+
+/**
  * Read the session override without applying the deployment default.
  * @param session - session whose log supplies the override.
  * @returns the last logged mode, or `undefined` without one.

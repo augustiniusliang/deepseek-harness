@@ -227,6 +227,20 @@ export class SandboxPolicyService extends Service {
     }
   }
 
+  /**
+   * Whether any registered execution world claims a path. Confinement
+   * providers read this to pass world-owned commands through unwrapped: a
+   * host runner cannot fence a kernel it does not share (the Windows ACL
+   * runner cannot even read a 9P path's security), so a claimed workspace
+   * root runs `enforcement: 'partial'` — the world's own fs fence stays the
+   * file-effect boundary.
+   * @param path - the absolute path to test (a policy's workspace root).
+   * @returns true when a registered world claims the path.
+   */
+  worldClaims(path: string): boolean {
+    return this.claimedByWorld(path)
+  }
+
   /** Whether any registered world claims a path. */
   private claimedByWorld(path: string): boolean {
     for (const claim of this.pathClaims) {

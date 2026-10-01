@@ -179,8 +179,10 @@ describe('WorldRegistry', () => {
     const wsl = remoteBackend('wsl:Ubuntu', '/home/')
     ctx.worlds.register(wsl)
     expect(ctx.worlds.backendOf('wsl:Ubuntu')).toBe(wsl)
+    expect(ctx.worlds.backendOf('wsl:Ubuntu:ramos')).toBe(wsl)
     expect(ctx.worlds.backendOf('local')?.ref).toBe('local')
     expect(ctx.worlds.backendOf('ssh:nowhere')).toBeUndefined()
+    expect(ctx.worlds.backendOf('wsl:Debian:ramos')).toBeUndefined()
   })
 
   it('wraps the mounted fs and subprocess providers in the local backend', async () => {

@@ -22,7 +22,7 @@ import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import type { SubprocessRuntime } from '@deepseek-ai/dsh-subprocess'
 import type {} from '@deepseek-ai/dsh-session'
 import type {} from '@deepseek-ai/dsh-session-projection'
-import { LOCAL_WORLD_REF, isWorldRef } from './ref.ts'
+import { LOCAL_WORLD_REF, isWorldRef, parseWorldRef } from './ref.ts'
 import type { WorldRef } from './types.ts'
 
 export { LOCAL_WORLD_REF, formatWorldRef, isWorldRef, parseWorldRef } from './ref.ts'
@@ -178,13 +178,26 @@ export class WorldRegistry extends Service {
   }
 
   /**
-   * Look up one world by reference, local included.
+   * Look up one world by reference, local included. A user-qualified WSL
+   * reference (`wsl:<distro>:<user>`) resolves to its distribution's backend:
+   * the user is a per-session preference the backend reads from the workspace
+   * credentials, not a separate world.
    * @param ref - the world reference.
    * @returns the backend carrying `ref`, or undefined when no registered world does.
    */
   backendOf(ref: WorldRef): WorldBackend | undefined {
     if (ref === LOCAL_WORLD_REF) return this.local()
-    return this.backends.find(backend => backend.ref === ref)
+    const exact = this.backends.find(backend => backend.ref === ref)
+    if (exact !== undefined) return exact
+    try {
+      const parsed = parseWorldRef(ref)
+      if (parsed.kind === 'wsl' && parsed.user !== undefined) {
+        return this.backends.find(backend => backend.ref === `wsl:${parsed.distro}`)
+      }
+    } catch {
+      // An unparseable ref simply has no backend.
+    }
+    return undefined
   }
 
   /** The first backend claiming a path, or undefined when none does. */

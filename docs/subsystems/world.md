@@ -71,7 +71,10 @@ detectWorldForCwd(cwd?: string): WorldRef
 list(): { ref: WorldRef; displayName: string }[]
 
 /**
- * Look up one world by reference, local included.
+ * Look up one world by reference, local included. A user-qualified WSL
+ * reference (`wsl:<distro>:<user>`) resolves to its distribution's backend:
+ * the user is a per-session preference the backend reads from the workspace
+ * credentials, not a separate world.
  * @param ref - the world reference.
  * @returns the backend carrying `ref`, or undefined when no registered world does.
  */

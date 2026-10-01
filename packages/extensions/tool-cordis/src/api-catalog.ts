@@ -1857,6 +1857,12 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
         returns: 'the claim\'s disposer.',
       },
       {
+        signature: 'worldClaims(path: string): boolean',
+        description: 'Whether any registered execution world claims a path. Confinement providers read this to pass world-owned commands through unwrapped: a host runner cannot fence a kernel it does not share (the Windows ACL runner cannot even read a 9P path\'s security), so a claimed workspace root runs `enforcement: \'partial\'` — the world\'s own fs fence stays the file-effect boundary.',
+        parameters: [{ name: 'path', description: 'the absolute path to test (a policy\'s workspace root).' }],
+        returns: 'true when a registered world claims the path.',
+      },
+      {
         signature: 'overrideOf(session: Session): SandboxMode | undefined',
         description: 'Read the session override without applying the deployment default.',
         parameters: [{ name: 'session', description: 'session whose log supplies the override.' }],
@@ -3764,7 +3770,7 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
       },
       {
         signature: 'backendOf(ref: WorldRef): WorldBackend | undefined',
-        description: 'Look up one world by reference, local included.',
+        description: 'Look up one world by reference, local included. A user-qualified WSL reference (`wsl:<distro>:<user>`) resolves to its distribution\'s backend: the user is a per-session preference the backend reads from the workspace credentials, not a separate world.',
         parameters: [{ name: 'ref', description: 'the world reference.' }],
         returns: 'the backend carrying `ref`, or undefined when no registered world does.',
       },

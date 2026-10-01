@@ -21,6 +21,8 @@ import {
 } from '@deepseek-ai/dsh-sandbox-local'
 import type { Config } from '@deepseek-ai/dsh-sandbox-local'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from '../src/profiles.ts'
+import SandboxPolicyService from '@deepseek-ai/dsh-sandbox-policy'
+import SessionProjectionRegistry from '@deepseek-ai/dsh-session-projection'
 
 const RO: SandboxPolicy = { mode: 'read-only', workspaceRoot: '/ws' }
 const WW: SandboxPolicy = { mode: 'workspace-write', workspaceRoot: '/ws' }
@@ -37,6 +39,18 @@ async function setup(config: Config = {}, internals: LocalSandboxProvider['inter
   const sandbox = ctx.sandbox as LocalSandboxProvider
   sandbox.internals = internals
   return { ctx, sandbox }
+}
+
+/** A confine result for a workspace root a registered execution world claims. */
+async function confinedWithClaim(root: string, argv: readonly string[]) {
+  const ctx = new Context()
+  await ctx.plugin(SessionProjectionRegistry)
+  await ctx.plugin(SandboxPolicyService, { mode: 'workspace-write' })
+  const disposeClaim = ctx.sandboxPolicy.registerPathClaim(path => path === root)
+  await ctx.plugin(LocalSandboxProvider, {})
+  const confined = await ctx.sandbox.confine(argv, { mode: 'workspace-write', workspaceRoot: root })
+  disposeClaim()
+  return confined
 }
 
 /**
@@ -143,6 +157,19 @@ describe('profile dialects', () => {
 })
 
 describe('runnerCommand config', () => {
+  it('a world-claimed workspace root passes argv through unwrapped with partial enforcement', async () => {
+    // UNC spellings are absolute on win32 and POSIX alike; on POSIX this
+    // path is not absolute, which is exactly what the claim exists to bypass.
+    const root = process.platform === 'win32' ? '\\\\wsl.localhost\\Ubuntu\\home\\u' : 'wslhome/u'
+    const confined = await confinedWithClaim(root, ['bash', '-c', 'echo hi'])
+    expect(confined).toEqual({
+      argv: ['bash', '-c', 'echo hi'],
+      enforcement: 'partial',
+      denialSignatures: [],
+      runnerFailureRules: [],
+    })
+  })
+
   it('a non-empty runnerCommand skips the chain: runner argv + bwrap-shaped profile + -- + caller argv, asserted full', async () => {
     const probeBwrap = vi.fn(() => false)
     const probeLandlock = vi.fn(() => 'unusable' as const)

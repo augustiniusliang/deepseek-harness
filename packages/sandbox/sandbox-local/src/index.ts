@@ -37,6 +37,7 @@ import z from '@deepseek-ai/schemastery'
 import { SandboxProvider, SandboxUnavailableError, canonicalPath } from '@deepseek-ai/dsh-sandbox'
 import type { ConfinedArgv, ConfinedSandboxMode, RunnerFailureRule, SandboxEnforcement, SandboxPolicy } from '@deepseek-ai/dsh-sandbox'
 import type { SessionId } from '@deepseek-ai/dsh-session'
+import type {} from '@deepseek-ai/dsh-sandbox-policy'
 import { AclWriteGrant, assertTempRootOutsideWorkspace, tempWriteSid, workspaceWriteSid } from '@deepseek-ai/dsh-sandbox-windows-acl'
 import { assertNever } from '@deepseek-ai/dsh-util-values'
 import { bwrapProfileArgs, landlockProfileArgs, seatbeltProfileArgs } from './profiles.ts'
@@ -331,6 +332,18 @@ export class LocalSandboxProvider extends SandboxProvider {
             .map(canonicalPath)
             .filter((root, index, roots) => roots.indexOf(root) === index && root !== workspaceRoot),
         },
+    }
+    // A world-claimed workspace root runs unwrapped: the host runners share no
+    // kernel with that world (the windows-acl runner cannot even read a 9P
+    // path's security), so enforcement stays with the world's own fs fence —
+    // the 'partial' honesty the upstream WSL plugin recorded for the same split.
+    if (this.ctx.get('sandboxPolicy')?.worldClaims(workspaceRoot) === true) {
+      return Promise.resolve<ConfinedArgv>({
+        argv: [...argv],
+        enforcement: 'partial',
+        denialSignatures: [],
+        runnerFailureRules: [],
+      })
     }
     if (this.runnerCommand !== undefined) {
       return Promise.resolve<ConfinedArgv>({
