@@ -26,17 +26,22 @@ export interface TeamActionInjected {
 /** Durable lifecycle overlaid with the member Session's live turn activity. */
 type MemberStatus = 'running' | 'inactive' | 'provisioning' | 'failed'
 
+/** User-visible execution state derived from durable task and live owner state. */
+type TaskExecutionState = 'blocked' | 'ready' | 'starting' | 'running' | 'waiting' | 'failed' | 'completed'
+
 /** Full props of the Team conversation-header action. */
 export type TeamActionProps =
   PropsRuntime<'conversation.session.header.actions'> & TeamActionInjected & PropsLocale<typeof NS>
 
-function statusKey(status: TeamTask['status']): TeamKey {
+function taskStatusKey(status: TaskExecutionState): TeamKey {
   switch (status) {
-    case 'pending': return 'status.pending'
-    case 'in_progress': return 'status.in_progress'
-    case 'completed': return 'status.completed'
-    /* v8 ignore next -- Team views omit deleted task tombstones. */
-    case 'deleted': return 'status.completed'
+    case 'blocked': return 'taskStatus.blocked'
+    case 'ready': return 'taskStatus.ready'
+    case 'starting': return 'taskStatus.starting'
+    case 'running': return 'taskStatus.running'
+    case 'waiting': return 'taskStatus.waiting'
+    case 'failed': return 'taskStatus.failed'
+    case 'completed': return 'taskStatus.completed'
   }
 }
 
@@ -57,14 +62,30 @@ function memberDotState(status: Exclude<MemberStatus, 'inactive'>): StateDotStat
   }
 }
 
-function taskDotState(task: TeamTask): StateDotState {
-  switch (task.status) {
-    case 'pending': return task.ready ? 'idle' : 'warning'
-    case 'in_progress': return 'ongoing'
+function taskDotState(status: TaskExecutionState): StateDotState {
+  switch (status) {
+    case 'blocked': return 'warning'
+    case 'ready':
+    case 'waiting': return 'idle'
+    case 'starting':
+    case 'running': return 'ongoing'
+    case 'failed': return 'error'
     case 'completed': return 'done'
-    /* v8 ignore next -- Team views omit deleted task tombstones. */
-    case 'deleted': return 'idle'
   }
+}
+
+/** Overlay one durable task with dependency and owner runtime state. */
+function taskExecutionState(
+  task: TeamTask,
+  owner: TeamMemberProjection | undefined,
+  ownerRunning: boolean | undefined,
+): TaskExecutionState {
+  if (task.status === 'completed' || task.status === 'deleted') return 'completed'
+  if (task.remainingBlockers.length > 0) return 'blocked'
+  if (task.status === 'pending') return task.ownerName === undefined ? 'ready' : 'starting'
+  if (owner?.phase === 'provisioning') return 'starting'
+  if (owner?.phase === 'failed') return 'failed'
+  return ownerRunning === true ? 'running' : 'waiting'
 }
 
 type TeamMemberRowProps = Pick<TeamActionProps,
@@ -126,10 +147,24 @@ function TeamMemberRow({
 }
 
 /** Task card with a two-line description clamp expanded from a toggle in the meta row. */
-function TaskCard({ task, t }: { task: TeamTask; t: TranslateNS<typeof NS> }) {
+function TaskCard({
+  task, members, useSessions, useSessionStatus, t,
+}: {
+  task: TeamTask
+  members: readonly TeamMemberProjection[]
+  useSessions: TeamActionProps['useSessions']
+  useSessionStatus: TeamActionProps['useSessionStatus']
+  t: TranslateNS<typeof NS>
+}) {
   const [expanded, setExpanded] = useState(false)
   const [clamped, setClamped] = useState(false)
   const textRef = useRef<HTMLParagraphElement>(null)
+  const owner = task.ownerName === undefined
+    ? undefined
+    : members.find(member => member.name === task.ownerName)
+  const running = useSessionStatus(state => owner === undefined ? undefined : state.get(owner.id)?.running)
+  const summaryRunning = useSessions(state => owner === undefined ? undefined : state.byId[owner.id]?.running)
+  const executionState = taskExecutionState(task, owner, running ?? summaryRunning)
   useLayoutEffect(() => {
     if (expanded) return
     const paragraph = textRef.current
@@ -147,8 +182,8 @@ function TaskCard({ task, t }: { task: TeamTask; t: TranslateNS<typeof NS> }) {
       <div className={css.taskTitle}>
         <strong>{task.subject}</strong>
         <span className={css.taskState}>
-          <StateDot state={taskDotState(task)} />
-          <span>{t(statusKey(task.status))}</span>
+          <StateDot state={taskDotState(executionState)} />
+          <span>{t(taskStatusKey(executionState))}</span>
         </span>
       </div>
       <p ref={textRef} className={expanded ? undefined : css.clampedDescription}>{task.description}</p>
@@ -166,8 +201,9 @@ function TaskCard({ task, t }: { task: TeamTask; t: TranslateNS<typeof NS> }) {
         )}
         <span>{task.id}</span>
         <span>{t('owner')}: {task.ownerName ?? t('unowned')}</span>
-        {task.status === 'pending' && <span>{task.ready ? t('ready') : t('blocked')}</span>}
-        {task.blockedBy.length > 0 && <span>{t('blockedBy')}: {task.blockedBy.join(', ')}</span>}
+        {task.remainingBlockers.length > 0 && (
+          <span>{t('waitingFor')}: {task.remainingBlockers.join(', ')}</span>
+        )}
         {task.writeScopes.length > 0 && <span>{t('writeScopes')}: {task.writeScopes.join(', ')}</span>}
         {task.writeScopeWarnings.map(warning => <span key={warning} className={css.warning}>{warning}</span>)}
       </div>
@@ -342,7 +378,16 @@ export function TeamAction({
                       <>
                         <h3>{t('tasks')}<span className={css.count}>{team.tasks.length}</span></h3>
                         <div className={css.tasks}>
-                          {team.tasks.map(task => <TaskCard key={task.id} task={task} t={t} />)}
+                          {team.tasks.map(task => (
+                            <TaskCard
+                              key={task.id}
+                              task={task}
+                              members={team.members}
+                              useSessions={useSessions}
+                              useSessionStatus={useSessionStatus}
+                              t={t}
+                            />
+                          ))}
                         </div>
                       </>
                     )}

@@ -76,6 +76,8 @@ roster 显示每个成员的职责（`lead` 或 `teammate`）与当前状态：`
 
 任务有 owner：成员 claim 任务开始工作，完成后标记完成、释放回板或重新打开；Lead 可以把任务分配给任意成员。每次变更都是 compare-and-set：基于过期副本的更新会被拒绝，因此两个成员不会悄悄覆盖彼此的成果。
 
+与任务绑定的 teammate dispatch 采用失败关闭。Lead 先预留一个就绪且无 owner 的任务，把 provisioning teammate 记录为 owner，之后才投递首个 prompt。被依赖阻塞的任务不会创建 teammate。启动失败会把精确的已分配 revision 回滚为无 owner 的 `pending`；恢复也会释放残留的 Lead 预留，以及 owner 的 provisioning 被恢复为 failed 的任务。未完成的依赖 edge 不允许移除，也不能添加到已启动任务；已完成 edge 可以清理且不改变 readiness。
+
 当两个 in-progress 任务计划触及重叠路径时，文件提示会产生警告——它们绝不阻止任何操作。已删除任务保留在历史中，但从活动列表中消失。
 
 ### 等待与中断
@@ -136,7 +138,7 @@ Lead 可以停止 teammate 的当前轮次，而不会删除其排队的消息�
 
 ### 共享任务板
 
-任务是完整版本化快照；每次变更都携带 `expectedRevision`，陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，而不会覆盖更新的值。数字 `task-<n>` id 的后缀必须是安全整数，id 空间耗尽时报告 `TEAM_TASK_LIMIT`，而不是复用最后一个 id。已删除任务作为 tombstone 保留以供回放与维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。`writeScopes` 是规范化后的 workspace 相对前缀；视图会对与 in-progress 任务的重叠发出警告，但绝不阻止 claim 或授予写权限。
+任务是完整版本化快照；每次变更都携带 `expectedRevision`，陈旧调用方会收到 `TEAM_TASK_STALE_REVISION`，而不会覆盖更新的值。数字 `task-<n>` id 的后缀必须是安全整数，id 空间耗尽时报告 `TEAM_TASK_LIMIT`，而不是复用最后一个 id。已删除任务作为 tombstone 保留以供回放与维持 id 稳定，但不占用 `maxTasks`，也不出现在 `listTasks()` 中。视图把仍未完成的 `remainingBlockers` 与声明过的 `blockedBy` 历史分开暴露。`writeScopes` 是规范化后的 workspace 相对前缀；视图会对与 in-progress 任务的重叠发出警告，但绝不阻止 claim 或授予写权限。
 
 ### 等待与中断
 

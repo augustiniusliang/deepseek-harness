@@ -33,6 +33,12 @@ export interface TeamMembership {
   readonly name: string
 }
 
+/** Internal lifecycle hooks used to commit related state before prompt delivery. */
+export interface TeamRosterSpawnHooks {
+  /** Runs after the provisioning member is durable and before the child receives its first prompt. */
+  readonly beforeStart?: (member: TeamMemberSnapshot) => Promise<void>
+}
+
 /**
  * Resolve one active Team member by model-facing name, including the Lead pseudo-row.
  * @param root - exact live Team Lead.
@@ -165,9 +171,13 @@ export class TeamRoster {
    * @param request - immutable name, description, prompt, context mode, provider, and cancellation.
    * @returns the active roster row.
    */
-  async spawn(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult> {
+  async spawn(
+    caller: Agent,
+    request: SpawnTeammateRequest,
+    hooks: TeamRosterSpawnHooks = {},
+  ): Promise<SpawnTeammateResult> {
     if (this.lifecycle.disposed) throw new TeamError('Agent Teams service is disposing', 'TEAM_DISPOSED')
-    const operation = this.spawnAdmitted(caller, request)
+    const operation = this.spawnAdmitted(caller, request, hooks)
     this.inFlightCreations.add(operation)
     try {
       return await operation
@@ -246,6 +256,7 @@ export class TeamRoster {
   private async spawnAdmitted(
     caller: Agent,
     request: SpawnTeammateRequest,
+    hooks: TeamRosterSpawnHooks,
   ): Promise<SpawnTeammateResult> {
     const membership = this.membership(caller)
     if (membership.role !== 'lead') {
@@ -279,6 +290,7 @@ export class TeamRoster {
 
     let started: ContinuableStart
     try {
+      await hooks.beforeStart?.(member)
       started = await this.ctx.subagents.startContinuable({
         childId,
         provider: request.provider,

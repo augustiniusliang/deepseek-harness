@@ -92,6 +92,8 @@ export interface TeamTaskView {
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly ownerName?: string
+  /** Incomplete declared dependencies in task creation order. */
+  readonly remainingBlockers: TeamTaskId[]
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
 }
@@ -175,6 +177,16 @@ export interface SpawnTeammateRequest {
 /** Result after one teammate reaches a durable active or failed edge. */
 export interface SpawnTeammateResult {
   readonly member: TeamMemberView
+}
+
+/** Input for starting one teammate against one ready shared task. */
+export interface DispatchTeamTaskRequest extends SpawnTeammateRequest {
+  readonly taskId: TeamTaskId
+}
+
+/** Result after the teammate starts and owns the dispatched task. */
+export interface DispatchTeamTaskResult extends SpawnTeammateResult {
+  readonly task: TeamTaskView
 }
 
 /** Input for one durable peer message. */

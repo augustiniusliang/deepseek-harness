@@ -326,6 +326,7 @@ const teamTaskViewSchema = z.object({
   blockedBy: z.array(teamTaskIdSchema),
   writeScopes: z.array(z.string()),
   ownerName: z.string().optional(),
+  remainingBlockers: z.array(teamTaskIdSchema),
   ready: z.boolean(),
   writeScopeWarnings: z.array(z.string()),
 }).strict() as z.ZodType<TeamTaskView>

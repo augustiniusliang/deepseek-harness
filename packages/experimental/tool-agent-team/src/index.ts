@@ -34,7 +34,7 @@ The Team Lead and all teammates share the same working directory and filesystem.
 
 Prefer read/edit/write for file changes. If a file operation returns FS_STALE_VERSION, read the current file, rebase your intended change onto the new content, and retry. Bash, formatters, code generators, and scripts are not fully protected by the filesystem version guard; coordinate them explicitly and have the Lead review the final diff and run tests.
 
-Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Shared-task workflow is list, get, claim with the current revision, perform the work, then complete. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
+Use the target returned by spawn_teammate or list_agents for send_message and interrupt_agent, or as owner when assigning or filtering shared tasks. send_message steers a running target at its nearest step boundary and starts or resumes an inactive target. inactive means no turn is executing; it does not describe task completion, success, failure, or waiting for other agents. provisioning means member creation is in progress; failed means member creation failed. A delivered peer item starts with its stable message id and sender name. A successful send is already durable even when its result says queued; do not resend it. Create shared tasks and their dependencies before starting teammates. spawn_teammate requires one ready task and atomically reserves it before the teammate receives work; never remove an incomplete dependency to bypass readiness or add one after a task starts. Existing members claim ready tasks with the current revision, perform the work, then complete them. Task readiness never starts an owner. Before wait_agent, use list_agents and make sure another required member is running or provisioning; use send_message first when the required member is inactive. wait_agent observes only changes after that call starts, never wakes a member, and returns noProgress immediately when no other member can produce a change. Re-list after wakeup or timeout. The Lead must wait for required teammates before giving the final answer.`
 
 const ACTIVE_WAIT_STATUSES: ReadonlySet<TeamMemberView['status']> = new Set(['running', 'provisioning'])
 const NO_ACTIVE_PEER_MESSAGE = 'No other Team member is running or provisioning. wait_agent cannot make progress or wake inactive teammates. Re-list with list_agents and team_task_list, then use send_message to wake each required inactive teammate before waiting again.'
@@ -78,6 +78,7 @@ const TASK_VIEW_SCHEMA = {
     ownerName: { type: 'string' },
     blockedBy: { type: 'array', required: true, items: { type: 'string' } },
     writeScopes: { type: 'array', required: true, items: { type: 'string' } },
+    remainingBlockers: { type: 'array', required: true, items: { type: 'string' } },
     ready: { type: 'boolean', required: true },
     writeScopeWarnings: { type: 'array', required: true, items: { type: 'string' } },
   },
@@ -88,6 +89,7 @@ const SPAWN_VALUE_SCHEMA = {
   additionalProperties: false,
   properties: {
     member: { ...MEMBER_VIEW_SCHEMA, required: true },
+    task: { ...TASK_VIEW_SCHEMA, required: true },
   },
 } as const
 
@@ -174,10 +176,11 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
 
     register(scoped.tools.register(defineTool({
       name: 'spawn_teammate',
-      description: 'Create one named, durable teammate. Only the Team Lead may call this tool.',
+      description: 'Start one named, durable teammate for a ready shared task. The task is reserved before the teammate receives its first prompt. Only the Team Lead may call this tool.',
       parameters: {
         name: { type: 'string', required: true, description: 'Unique lower-kebab-case teammate name.' },
         description: { type: 'string', required: true, description: 'Short description of the delegated responsibility.' },
+        task_id: { type: 'string', required: true, description: 'Ready unowned shared task to reserve and assign.' },
         prompt: { type: 'string', required: true, description: 'Complete initial task for the teammate.' },
         context: {
           type: 'string',
@@ -189,13 +192,16 @@ function install(agent: Agent, ctx: Context, config: Required<Config>): () => vo
       async execute(args, exec) {
         const agent = callingAgent(exec.agent, 'spawn_teammate')
         const context = args.context ?? 'fresh'
-        const result = await ctx.agentTeams.spawnTeammate(agent, {
+        const result = await ctx.agentTeams.dispatchTaskToTeammate(agent, {
           name: args.name,
           description: args.description,
+          taskId: TeamTaskId(args.task_id),
           prompt: [
             { type: 'text', text: `<system-reminder>
 You are teammate "${args.name.trim()}".
 Your Team Lead is named "lead".
+You own shared task "${args.task_id}". It was claimed for you before this prompt was delivered.
+Read its latest value with team_task_get, perform only that task, then complete it with team_task_update.
 Use list_agents({}) to find your teammates and their names.
 To message your Team Lead, use send_message({ target: "lead", message: "..." }).
 To message another teammate, use send_message({ target: "<teammate name>", message: "..." }).
@@ -208,7 +214,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
           provider: context === 'fork' ? config.forkProvider : config.freshProvider,
           signal: exec.signal,
         })
-        return { member: modelMember(result.member) }
+        return { member: modelMember(result.member), task: result.task }
       },
     })))
 
@@ -359,7 +365,7 @@ To message another teammate, use send_message({ target: "<teammate name>", messa
 
     register(scoped.tools.register(defineTool({
       name: 'team_task_update',
-      description: 'Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.',
+      description: 'Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. set_dependencies cannot remove an incomplete blocker or add one after work starts.',
       parameters: {
         task_id: { type: 'string', required: true, description: 'Shared task id.' },
         expected_revision: { type: 'integer', required: true, description: 'Current task revision used as the CAS precondition.' },

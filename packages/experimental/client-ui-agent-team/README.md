@@ -35,9 +35,9 @@ Roster rows show durable names and phases. Provisioning and running members use 
 
 ### Inspect the task board
 
-Ready pending tasks use idle, blocked pending tasks use warning, in-progress tasks use ongoing, and completed tasks use done.
+Task labels combine durable task state with the owner's live Session: `Blocked` for incomplete dependencies (including a legacy inconsistent in-progress record), `Ready` for an unowned pending task, `Starting` while dispatch is provisioning, `Running` only while the owner's turn is live, `Waiting` when an in-progress owner is inactive, `Failed` when member startup failed, and `Completed` for the terminal task state.
 
-The read-only task board shows task identity, owner, blockers, readiness, advisory write scopes, and overlap warnings. Descriptions longer than two lines have an expand toggle. Section headings show member and task counts; an empty board shows a short description, and a lone member with no tasks uses a single-column panel. Team agents create and update tasks through their tools; the panel provides no task mutation controls. When the projection reports a rejected persisted Team record, the panel shows that failure above the last valid roster and tasks.
+The read-only task board shows task identity, owner, only the still-incomplete blockers, advisory write scopes, and overlap warnings. Completed blockers no longer remain as misleading “waiting for” labels. Descriptions longer than two lines have an expand toggle. Section headings show member and task counts; an empty board shows a short description, and a lone member with no tasks uses a single-column panel. Team agents create and update tasks through their tools; the panel provides no task mutation controls. When the projection reports a rejected persisted Team record, the panel shows that failure above the last valid roster and tasks.
 
 -----
 

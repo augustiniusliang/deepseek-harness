@@ -71,7 +71,7 @@ interface TeamTaskSnapshot {
 }
 ```
 
-`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, readiness, and write-scope overlap warnings without changing the durable snapshot.
+`pending` is unstarted or released, `in_progress` carries an owner, `completed` satisfies blockers, and `deleted` is a retained tombstone. Views add owner name, `remainingBlockers`, readiness, and write-scope overlap warnings without changing the durable snapshot. Dispatch reserves a ready task, writes its provisioning teammate as owner, and only then delivers the initial prompt; removing incomplete dependency edges or adding them after work starts is rejected.
 
 <a id="web-projection"></a>
 
@@ -102,6 +102,8 @@ interface TeamTaskView {
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly ownerName?: string
+  /** Incomplete declared dependencies in task creation order. */
+  readonly remainingBlockers: TeamTaskId[]
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
 }
@@ -160,6 +162,16 @@ listMembers(agent: Agent): TeamMemberView[]
  * @returns the active roster row.
  */
 async spawnTeammate(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult>
+
+/**
+ * Reserve one ready task, provision its teammate identity, assign ownership,
+ * then deliver the first prompt. Startup failure releases the exact committed
+ * dispatch revision.
+ * @param caller - exact live Lead Agent.
+ * @param request - ready task identity plus teammate creation fields.
+ * @returns the active roster row and its in-progress task.
+ */
+async dispatchTaskToTeammate( caller: Agent, request: DispatchTeamTaskRequest, ): Promise<DispatchTeamTaskResult>
 
 /**
  * Queue one durable peer message, then attempt immediate delivery.

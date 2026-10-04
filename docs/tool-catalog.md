@@ -2281,7 +2281,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `spawn_teammate`
 
-Create one named, durable teammate. Only the Team Lead may call this tool.
+Start one named, durable teammate for a ready shared task. The task is reserved before the teammate receives its first prompt. Only the Team Lead may call this tool.
 
 ```json
 {
@@ -2294,6 +2294,10 @@ Create one named, durable teammate. Only the Team Lead may call this tool.
     "description": {
       "type": "string",
       "description": "Short description of the delegated responsibility."
+    },
+    "task_id": {
+      "type": "string",
+      "description": "Ready unowned shared task to reserve and assign."
     },
     "prompt": {
       "type": "string",
@@ -2311,6 +2315,7 @@ Create one named, durable teammate. Only the Team Lead may call this tool.
   "required": [
     "name",
     "description",
+    "task_id",
     "prompt"
   ]
 }
@@ -2420,7 +2425,7 @@ Source: [`packages/experimental/tool-agent-team/src/index.ts`](../packages/exper
 
 ### `team_task_update`
 
-Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list.
+Compare-and-set a shared task action using the latest revision from team_task_get or team_task_list. set_dependencies cannot remove an incomplete blocker or add one after work starts.
 
 ```json
 {

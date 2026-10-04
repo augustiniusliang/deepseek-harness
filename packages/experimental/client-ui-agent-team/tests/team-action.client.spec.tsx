@@ -35,6 +35,7 @@ const task: TeamTask = {
   ownerName: 'lead',
   blockedBy: [],
   writeScopes: ['src'],
+  remainingBlockers: [],
   ready: false,
   writeScopeWarnings: ['write scopes overlap with task-2'],
 }
@@ -173,6 +174,58 @@ describe('TeamAction', () => {
     expect(screen.getByRole('button', { name: /^worker.*运行中/u })).toBeTruthy()
   })
 
+  it('distinguishes dependency, dispatch, running, waiting, failed, and completed task states', () => {
+    const failed: TeamMemberProjection = {
+      id: 'failed-owner' as SessionId,
+      name: 'failed-owner',
+      role: 'teammate',
+      phase: 'failed',
+      error: 'startup failed',
+    }
+    const { ownerName: _ownerName, ...unowned } = task
+    const b = bench({
+      statuses: new Map([[WORKER, { running: true, pendingInteraction: undefined, completionUnread: false }]]),
+      running: { [SESSION]: false },
+      projections: {
+        [SESSION]: {
+          state: 'ready',
+          error: null,
+          values: {
+            agentTeam: {
+              members: [lead, worker, failed],
+              tasks: [
+                {
+                  ...unowned,
+                  id: 'blocked' as TeamTaskId,
+                  status: 'in_progress',
+                  blockedBy: [TASK_2],
+                  remainingBlockers: [TASK_2],
+                  ownerName: 'worker',
+                  ready: false,
+                },
+                { ...task, id: 'starting' as TeamTaskId, status: 'pending', ownerName: 'lead' },
+                { ...task, id: 'running' as TeamTaskId, ownerName: 'worker' },
+                { ...task, id: 'waiting' as TeamTaskId, ownerName: 'lead' },
+                { ...task, id: 'failed' as TeamTaskId, ownerName: 'failed-owner' },
+                { ...task, id: 'completed' as TeamTaskId, status: 'completed', ownerName: 'worker' },
+              ],
+            },
+          },
+        },
+      },
+    })
+    render(<TeamAction {...b.props} />)
+    openPanel()
+    for (const key of [
+      'taskStatus.blocked',
+      'taskStatus.starting',
+      'taskStatus.running',
+      'taskStatus.waiting',
+      'taskStatus.failed',
+      'taskStatus.completed',
+    ] as const) expect(screen.getAllByText(zh[key]).length).toBeGreaterThan(0)
+  })
+
   it('reads the Lead projection from an addressed teammate conversation', () => {
     const b = bench({ sessionId: WORKER, parentSessionId: SESSION })
     render(<TeamAction {...b.props} />)
@@ -282,7 +335,14 @@ describe('TeamAction', () => {
               ],
               tasks: [
                 { ...unownedTask, id: 'ready-task' as TeamTaskId, status: 'pending', ready: true },
-                { ...unownedTask, id: 'blocked-task' as TeamTaskId, status: 'pending', ready: false, blockedBy: [TASK_1] },
+                {
+                  ...unownedTask,
+                  id: 'blocked-task' as TeamTaskId,
+                  status: 'pending',
+                  ready: false,
+                  blockedBy: [TASK_1],
+                  remainingBlockers: [TASK_1],
+                },
                 { ...task, id: 'completed-task' as TeamTaskId, status: 'completed', ownerName: 'worker' },
               ],
             },
@@ -294,8 +354,9 @@ describe('TeamAction', () => {
     render(<TeamAction {...b.props} {...b.injected} />)
     openPanel()
     expect(screen.getByText('provider failed')).toBeTruthy()
-    expect(screen.getByText(zh.ready)).toBeTruthy()
-    expect(screen.getByText(zh.blocked)).toBeTruthy()
+    expect(screen.getByText(zh['taskStatus.ready'])).toBeTruthy()
+    expect(screen.getByText(zh['taskStatus.blocked'])).toBeTruthy()
+    expect(screen.getByText(`${zh.waitingFor}: ${TASK_1}`)).toBeTruthy()
     expect(screen.getAllByText('Owner: 未分配')).toHaveLength(2)
     expect(screen.getByText('Owner: worker')).toBeTruthy()
     const failedMember = screen.getByRole<HTMLButtonElement>('button', { name: /failed-worker/u })

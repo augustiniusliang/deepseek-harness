@@ -669,6 +669,8 @@ export const LINK_MAP: Readonly<Record<string, string>> = {
   SpeechCatalog: 'voice-input.md',
   TranscriptionRequest: 'voice-input.md',
   CreateTeamTaskRequest: 'agent-team.md',
+  DispatchTeamTaskRequest: 'agent-team.md',
+  DispatchTeamTaskResult: 'agent-team.md',
   SendTeamMessageRequest: 'agent-team.md',
   SendTeamMessageResult: 'agent-team.md',
   SpawnTeammateRequest: 'agent-team.md',

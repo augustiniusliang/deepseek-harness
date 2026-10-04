@@ -26,6 +26,17 @@ export function taskReady(state: TeamState, task: TeamTaskSnapshot): boolean {
 }
 
 /**
+ * Return the declared dependencies that have not completed.
+ * @param state - Team state supplying sibling tasks.
+ * @param task - durable task snapshot to inspect.
+ * @returns incomplete blocker ids in declaration order.
+ */
+export function remainingBlockers(state: TeamState, task: TeamTaskSnapshot): TeamTaskSnapshot['blockedBy'] {
+  return task.blockedBy.filter(id =>
+    state.tasks.find(candidate => candidate.id === id)?.status !== 'completed')
+}
+
+/**
  * Derive one task view with owner name, readiness, and advisory write overlaps.
  * A committing caller may pass its pre-append state because `task` supplies the
  * new value explicitly; owner names, blocker readiness, and other task scopes
@@ -56,7 +67,8 @@ export function projectTaskView(state: TeamState, task: TeamTaskSnapshot): TeamT
     blockedBy: [...task.blockedBy],
     writeScopes: [...task.writeScopes],
     ...ownerName === undefined ? {} : { ownerName },
-    ready: task.status === 'pending' && taskReady(state, task),
+    remainingBlockers: remainingBlockers(state, task),
+    ready: task.status === 'pending' && task.ownerId === undefined && taskReady(state, task),
     writeScopeWarnings: [...warnings],
   }
 }

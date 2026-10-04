@@ -35,9 +35,9 @@ Roster 行展示持久名称与阶段。provisioning 和 running 成员使用共
 
 ### 查看任务板
 
-可开始的 pending 任务使用 idle 灰点，被依赖阻塞的 pending 任务使用 warning 橙点，in-progress 任务使用 ongoing loading，completed 任务使用 done 绿点。
+任务标签组合持久 task 状态与 owner 的实时 Session：未完成依赖（包括历史遗留的不一致 in-progress 记录）显示“已阻塞”，无 owner 的 pending 显示“可开始”，dispatch provisioning 显示“启动中”，只有 owner 的轮次确实 live 才显示“运行中”，in-progress 但 owner inactive 显示“等待中”，成员启动失败显示“失败”，终态任务显示“已完成”。
 
-只读任务板展示任务标识、负责人、依赖、就绪状态、提示性写入范围与重叠警告。超过两行的描述提供展开按钮。分区标题显示成员与任务数量；空任务板显示简短描述，只有一名成员且无任务时采用单列面板。Team agent 通过工具创建和更新任务；面板不提供任务修改控件。当投影报告某条持久 Team 记录被拒绝时，面板在最后有效的 roster 与任务上方显示该失败。
+只读任务板展示任务标识、负责人、仍未完成的 blocker、提示性写入范围与重叠警告。已完成 blocker 不会继续以误导性的“等待”标签出现。超过两行的描述提供展开按钮。分区标题显示成员与任务数量；空任务板显示简短描述，只有一名成员且无任务时采用单列面板。Team agent 通过工具创建和更新任务；面板不提供任务修改控件。当投影报告某条持久 Team 记录被拒绝时，面板在最后有效的 roster 与任务上方显示该失败。
 
 -----
 

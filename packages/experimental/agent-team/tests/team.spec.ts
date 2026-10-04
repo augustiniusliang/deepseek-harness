@@ -631,6 +631,7 @@ describe('Team shared task DAG', () => {
     })).rejects.toMatchObject({ code: 'TEAM_TASK_ALREADY_CLAIMED' })
     expect(ctx.agentTeams.getTask(beta, second.id)).toMatchObject({
       ready: false,
+      remainingBlockers: [first.id],
       writeScopeWarnings: [`write scopes overlap with ${first.id}`],
     })
     await expect(ctx.agentTeams.updateTask(beta, {
@@ -651,7 +652,7 @@ describe('Team shared task DAG', () => {
       action: 'complete',
     })
     expect(completed.status).toBe('completed')
-    expect(ctx.agentTeams.getTask(beta, second.id).ready).toBe(true)
+    expect(ctx.agentTeams.getTask(beta, second.id)).toMatchObject({ ready: true, remainingBlockers: [] })
     const secondClaim = await ctx.agentTeams.updateTask(beta, {
       taskId: second.id,
       expectedRevision: second.revision,
@@ -670,12 +671,144 @@ describe('Team shared task DAG', () => {
     await Promise.all([waitNoAgent(ctx, alpha.id), waitNoAgent(ctx, beta.id)])
   })
 
+  it('dispatches a teammate only after its task dependencies complete', async () => {
+    const { ctx, lead } = await setup(['hang'])
+    const blocker = await ctx.agentTeams.createTask(lead, { subject: 'research', description: 'research first' })
+    const dependent = await ctx.agentTeams.createTask(lead, {
+      subject: 'analysis',
+      description: 'analyze the completed research',
+      blockedBy: [blocker.id],
+    })
+
+    await expect(ctx.agentTeams.dispatchTaskToTeammate(lead, {
+      taskId: dependent.id,
+      name: 'analyst',
+      description: 'dependent analysis',
+      prompt: content('analyze only after research completes'),
+      context: 'fresh',
+      provider: 'spawn',
+      signal: SIGNAL,
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_BLOCKED' })
+    expect(ctx.agentTeams.listMembers(lead).map(member => member.name)).toEqual(['lead'])
+
+    const claimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: blocker.id,
+      expectedRevision: blocker.revision,
+      action: 'claim',
+    })
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: blocker.id,
+      expectedRevision: claimed.revision,
+      action: 'complete',
+    })
+    const dispatched = await ctx.agentTeams.dispatchTaskToTeammate(lead, {
+      taskId: dependent.id,
+      name: 'analyst',
+      description: 'dependent analysis',
+      prompt: content('analyze the completed research'),
+      context: 'fresh',
+      provider: 'spawn',
+      signal: SIGNAL,
+    })
+    expect(dispatched.task).toMatchObject({
+      id: dependent.id,
+      revision: 3,
+      status: 'in_progress',
+      ownerName: 'analyst',
+      remainingBlockers: [],
+      ready: false,
+    })
+    const analyst = await waitRunning(ctx, dispatched.member.id)
+    expect(ctx.agentTeams.getTask(analyst, dependent.id)).toMatchObject({ ownerName: 'analyst' })
+    ctx.agentTeams.interrupt(lead, 'analyst')
+    await waitNoAgent(ctx, analyst.id)
+  })
+
+  it('releases a task reservation when teammate startup fails', async () => {
+    const { ctx, lead } = await setup([])
+    const task = await ctx.agentTeams.createTask(lead, { subject: 'dispatch', description: 'must remain retryable' })
+
+    await expect(ctx.agentTeams.dispatchTaskToTeammate(lead, {
+      taskId: task.id,
+      name: 'missing-provider',
+      description: 'cannot start',
+      prompt: content('never runs'),
+      context: 'fresh',
+      provider: 'missing-provider',
+      signal: SIGNAL,
+    })).rejects.toThrow()
+    expect(ctx.agentTeams.getTask(lead, task.id)).toMatchObject({
+      revision: 4,
+      status: 'pending',
+      ready: true,
+      remainingBlockers: [],
+    })
+    expect(ctx.agentTeams.getTask(lead, task.id)).not.toHaveProperty('ownerName')
+  })
+
+  it('releases interrupted dispatch reservations and failed provisioning owners during recovery', async () => {
+    const { ctx, lead } = await setup([])
+    const reserved = await ctx.agentTeams.createTask(lead, {
+      subject: 'reserved', description: 'crashed before member provisioning',
+    })
+    const assigned = await ctx.agentTeams.createTask(lead, {
+      subject: 'assigned', description: 'crashed before prompt durability',
+    })
+    const failedMember: TeamMemberSnapshot = {
+      id: SessionId('crashed-child'),
+      name: 'crashed-worker',
+      description: 'crashed dispatch',
+      provider: 'spawn',
+      context: 'fresh',
+      phase: 'provisioning',
+    }
+    lead.session.append('team/task', {
+      version: 2,
+      teamId: TeamId(lead.id),
+      task: { ...durable(lead).tasks[0]!, revision: 2, ownerId: lead.id },
+    })
+    lead.session.append('team/member', {
+      version: 2, teamId: TeamId(lead.id), member: failedMember,
+    })
+    lead.session.append('team/task', {
+      version: 2,
+      teamId: TeamId(lead.id),
+      task: { ...durable(lead).tasks[1]!, revision: 2, ownerId: lead.id },
+    })
+    lead.session.append('team/task', {
+      version: 2,
+      teamId: TeamId(lead.id),
+      task: {
+        ...durable(lead).tasks[1]!,
+        revision: 3,
+        status: 'in_progress',
+        ownerId: failedMember.id,
+      },
+    })
+    await ctx.sessions.flush(lead.session)
+
+    await teamInternals(ctx).recoverFor(lead)
+
+    expect(ctx.agentTeams.listMembers(lead)[1]).toMatchObject({
+      name: 'crashed-worker', status: 'failed',
+    })
+    expect(ctx.agentTeams.getTask(lead, reserved.id)).toMatchObject({
+      revision: 3, status: 'pending', ready: true,
+    })
+    expect(ctx.agentTeams.getTask(lead, assigned.id)).toMatchObject({
+      revision: 4, status: 'pending', ready: true,
+    })
+    expect(ctx.agentTeams.getTask(lead, reserved.id)).not.toHaveProperty('ownerName')
+    expect(ctx.agentTeams.getTask(lead, assigned.id)).not.toHaveProperty('ownerName')
+  })
+
   it('rejects malformed scopes and every invalid dependency relation', async () => {
     const { ctx, lead } = await setup([])
     const first = await ctx.agentTeams.createTask(lead, { subject: 'one', description: 'one' })
     const second = await ctx.agentTeams.createTask(lead, {
       subject: 'two', description: 'two', blockedBy: [first.id],
     })
+    const third = await ctx.agentTeams.createTask(lead, { subject: 'three', description: 'three' })
     await expect(ctx.agentTeams.createTask(lead, {
       subject: 'bad', description: 'bad', blockedBy: [TeamTaskId('missing')],
     })).rejects.toMatchObject({ code: 'TEAM_TASK_NOT_FOUND' })
@@ -697,6 +830,35 @@ describe('Team shared task DAG', () => {
       action: 'set_dependencies',
       blockedBy: [second.id, second.id],
     })).rejects.toMatchObject({ code: 'TEAM_INVALID_ARGUMENT' })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: second.id,
+      expectedRevision: second.revision,
+      action: 'set_dependencies',
+      blockedBy: [],
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_BLOCKED' })
+    const claimed = await ctx.agentTeams.updateTask(lead, {
+      taskId: first.id,
+      expectedRevision: first.revision,
+      action: 'claim',
+    })
+    await expect(ctx.agentTeams.updateTask(lead, {
+      taskId: first.id,
+      expectedRevision: claimed.revision,
+      action: 'set_dependencies',
+      blockedBy: [third.id],
+    })).rejects.toMatchObject({ code: 'TEAM_TASK_INVALID_TRANSITION' })
+    await ctx.agentTeams.updateTask(lead, {
+      taskId: first.id,
+      expectedRevision: claimed.revision,
+      action: 'complete',
+    })
+    const pruned = await ctx.agentTeams.updateTask(lead, {
+      taskId: second.id,
+      expectedRevision: second.revision,
+      action: 'set_dependencies',
+      blockedBy: [],
+    })
+    expect(pruned).toMatchObject({ blockedBy: [], remainingBlockers: [], ready: true })
     for (const scope of ['', '.', '..', '/root', 'C:\\root', 'C:root', 'a//b', 'a/../b']) {
       await expect(ctx.agentTeams.createTask(lead, {
         subject: 'scope', description: 'scope', writeScopes: [scope],

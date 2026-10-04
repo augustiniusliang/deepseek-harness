@@ -11,6 +11,7 @@ import type { TeamTaskGraphViolation } from './task-graph.ts'
 import { TeamId, TeamTaskId } from './types.ts'
 import type {
   CreateTeamTaskRequest,
+  TeamMemberSnapshot,
   TeamTaskSnapshot,
   TeamTaskView,
   UpdateTeamTaskRequest,
@@ -96,6 +97,153 @@ export class TeamTaskBoard {
   }
 
   /**
+   * Reserve one ready task for a Lead-owned teammate dispatch.
+   * @param caller - exact live Team Lead creating the teammate.
+   * @param membership - caller role and exact live Lead.
+   * @param taskId - ready unowned task to reserve.
+   * @returns the pending task revision carrying the temporary Lead owner.
+   */
+  async reserveDispatch(
+    caller: Agent,
+    membership: TeamMembership,
+    taskId: TeamTaskId,
+  ): Promise<TeamTaskView> {
+    if (membership.role !== 'lead') {
+      throw new TeamError('only the Team Lead can dispatch tasks to new teammates', 'TEAM_LEAD_REQUIRED')
+    }
+    const root = membership.root
+    return this.journal.transact(root.id, async () => {
+      const state = this.journal.state(root)
+      const current = state.tasks.find(task => task.id === taskId)
+      if (current === undefined) throw new TeamError(`team task "${taskId}" not found`, 'TEAM_TASK_NOT_FOUND')
+      if (current.status !== 'pending' || current.ownerId !== undefined || !taskReady(state, current)) {
+        throw new TeamError(`team task "${taskId}" is not ready to dispatch`, 'TEAM_TASK_BLOCKED')
+      }
+      const task: TeamTaskSnapshot = {
+        ...current,
+        revision: current.revision + 1,
+        ownerId: caller.id,
+      }
+      await this.journal.appendAndFlush(root, 'team/task', { version: 2, teamId: TeamId(root.id), task })
+      return projectTaskView(state, task)
+    })
+  }
+
+  /**
+   * Transfer a pending dispatch reservation to its provisioning teammate.
+   * @param caller - exact live Team Lead that owns the reservation.
+   * @param membership - caller role and exact live Lead.
+   * @param taskId - reserved task identity.
+   * @param expectedRevision - revision returned by {@link reserveDispatch}.
+   * @param assignee - provisioning or active teammate created for the task.
+   * @returns the committed in-progress task.
+   */
+  async finishDispatch(
+    caller: Agent,
+    membership: TeamMembership,
+    taskId: TeamTaskId,
+    expectedRevision: number,
+    assignee: Pick<TeamMemberSnapshot, 'id' | 'name'>,
+  ): Promise<TeamTaskView> {
+    if (membership.role !== 'lead') {
+      throw new TeamError('only the Team Lead can finish a teammate dispatch', 'TEAM_LEAD_REQUIRED')
+    }
+    const root = membership.root
+    return this.journal.transact(root.id, async () => {
+      const state = this.journal.state(root)
+      const current = state.tasks.find(task => task.id === taskId)
+      if (current === undefined) throw new TeamError(`team task "${taskId}" not found`, 'TEAM_TASK_NOT_FOUND')
+      if (current.revision !== expectedRevision) {
+        throw new TeamError(
+          `stale team task "${taskId}" revision ${expectedRevision}; current revision is ${current.revision}`,
+          'TEAM_TASK_STALE_REVISION',
+        )
+      }
+      if (current.status !== 'pending' || current.ownerId !== caller.id) {
+        throw new TeamError(`team task "${taskId}" dispatch reservation changed`, 'TEAM_TASK_INVALID_TRANSITION')
+      }
+      const rosterMember = state.members.find(member => member.id === assignee.id && member.name === assignee.name)
+      if (rosterMember === undefined || rosterMember.phase === 'failed') {
+        throw new TeamError(`teammate "${assignee.name}" is not available for dispatch`, 'TEAM_MEMBER_NOT_FOUND')
+      }
+      const task: TeamTaskSnapshot = {
+        ...current,
+        revision: current.revision + 1,
+        status: 'in_progress',
+        ownerId: rosterMember.id,
+      }
+      await this.journal.appendAndFlush(root, 'team/task', { version: 2, teamId: TeamId(root.id), task })
+      return projectTaskView(state, task)
+    })
+  }
+
+  /**
+   * Release an unchanged dispatch reservation after teammate startup fails.
+   * @param caller - exact live Team Lead that owns the reservation.
+   * @param membership - caller role and exact live Lead.
+   * @param taskId - reserved task identity.
+   * @param expectedRevision - exact reservation or assigned-dispatch revision to release.
+   * @param expectedOwnerId - exact temporary owner committed by the dispatch.
+   * @returns the ready or blocked unowned task.
+   */
+  async cancelDispatch(
+    caller: Agent,
+    membership: TeamMembership,
+    taskId: TeamTaskId,
+    expectedRevision: number,
+    expectedOwnerId = caller.id,
+  ): Promise<TeamTaskView> {
+    if (membership.role !== 'lead') {
+      throw new TeamError('only the Team Lead can cancel a teammate dispatch', 'TEAM_LEAD_REQUIRED')
+    }
+    const root = membership.root
+    return this.journal.transact(root.id, async () => {
+      const state = this.journal.state(root)
+      const current = state.tasks.find(task => task.id === taskId)
+      if (current === undefined) throw new TeamError(`team task "${taskId}" not found`, 'TEAM_TASK_NOT_FOUND')
+      if (current.revision !== expectedRevision
+        || (current.status !== 'pending' && current.status !== 'in_progress')
+        || current.ownerId !== expectedOwnerId) {
+        throw new TeamError(`team task "${taskId}" dispatch reservation changed`, 'TEAM_TASK_STALE_REVISION')
+      }
+      const task: TeamTaskSnapshot = {
+        ...this.withoutOwner({ ...current, status: 'pending' }),
+        revision: current.revision + 1,
+      }
+      await this.journal.appendAndFlush(root, 'team/task', { version: 2, teamId: TeamId(root.id), task })
+      return projectTaskView(state, task)
+    })
+  }
+
+  /**
+   * Release dispatch-only ownership left by a process exit during provisioning.
+   * @param membership - recovered Lead membership and exact live root.
+   * @returns released task views in creation order.
+   */
+  async reconcileDispatches(membership: TeamMembership): Promise<TeamTaskView[]> {
+    if (membership.role !== 'lead') return []
+    const root = membership.root
+    return this.journal.transact(root.id, async () => {
+      const released: TeamTaskView[] = []
+      while (true) {
+        const state = this.journal.state(root)
+        const current = state.tasks.find((task) => {
+          if (task.status === 'pending' && task.ownerId === root.id) return true
+          if (task.status !== 'in_progress' || task.ownerId === undefined) return false
+          return state.members.some(member => member.id === task.ownerId && member.phase === 'failed')
+        })
+        if (current === undefined) return released
+        const task: TeamTaskSnapshot = {
+          ...this.withoutOwner({ ...current, status: 'pending' }),
+          revision: current.revision + 1,
+        }
+        await this.journal.appendAndFlush(root, 'team/task', { version: 2, teamId: TeamId(root.id), task })
+        released.push(projectTaskView(state, task))
+      }
+    })
+  }
+
+  /**
    * Compare-and-set one authorized task transition.
    * @param caller - exact live Team member authorizing the mutation.
    * @param membership - caller role and exact live Lead.
@@ -157,7 +305,26 @@ export class TeamTaskBoard {
         case 'set_dependencies':
           authorizeOwner()
           if (request.blockedBy === undefined) throw new TeamError('set_dependencies requires blocked_by', 'TEAM_INVALID_ARGUMENT')
-          next = { ...current, blockedBy: this.dependencies(request.blockedBy, state, current.id) }
+          {
+            const blockedBy = this.dependencies(request.blockedBy, state, current.id)
+            const removedIncomplete = current.blockedBy.filter(id =>
+              !blockedBy.includes(id)
+              && state.tasks.find(candidate => candidate.id === id)?.status !== 'completed')
+            if (removedIncomplete.length > 0) {
+              throw new TeamError(
+                `cannot remove incomplete blockers from team task "${current.id}": ${removedIncomplete.join(', ')}`,
+                'TEAM_TASK_BLOCKED',
+              )
+            }
+            if (current.status !== 'pending' && blockedBy.some(id =>
+              state.tasks.find(candidate => candidate.id === id)?.status !== 'completed')) {
+              throw new TeamError(
+                `cannot add incomplete blockers to started team task "${current.id}"`,
+                'TEAM_TASK_INVALID_TRANSITION',
+              )
+            }
+            next = { ...current, blockedBy }
+          }
           break
         case 'complete':
           authorizeOwner()

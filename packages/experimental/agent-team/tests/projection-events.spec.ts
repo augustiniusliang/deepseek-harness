@@ -501,11 +501,11 @@ describe('Agent Teams projection events', () => {
         tasks: [
           {
             id: 'task-1', revision: 2, subject: 'subject', description: 'description', status: 'in_progress',
-            blockedBy: [], writeScopes: ['src'], ownerName: 'worker-a', ready: false, writeScopeWarnings: [],
+            blockedBy: [], writeScopes: ['src'], ownerName: 'worker-a', remainingBlockers: [], ready: false, writeScopeWarnings: [],
           },
           {
             id: 'task-2', revision: 1, subject: 'subject', description: 'description', status: 'pending',
-            blockedBy: ['task-1'], writeScopes: ['src/web'], ready: false, writeScopeWarnings: ['write scopes overlap with task-1'],
+            blockedBy: ['task-1'], writeScopes: ['src/web'], remainingBlockers: ['task-1'], ready: false, writeScopeWarnings: ['write scopes overlap with task-1'],
           },
         ],
       })

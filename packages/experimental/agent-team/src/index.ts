@@ -17,6 +17,8 @@ import { TeamId, TeamTaskId } from './types.ts'
 import type {
   Config,
   CreateTeamTaskRequest,
+  DispatchTeamTaskRequest,
+  DispatchTeamTaskResult,
   SendTeamMessageRequest,
   SendTeamMessageResult,
   SpawnTeammateRequest,
@@ -152,6 +154,53 @@ export class TeamService extends Service {
   }
 
   /**
+   * Reserve one ready task, provision its teammate identity, assign ownership,
+   * then deliver the first prompt. Startup failure releases the exact committed
+   * dispatch revision.
+   * @param caller - exact live Lead Agent.
+   * @param request - ready task identity plus teammate creation fields.
+   * @returns the active roster row and its in-progress task.
+   */
+  async dispatchTaskToTeammate(
+    caller: Agent,
+    request: DispatchTeamTaskRequest,
+  ): Promise<DispatchTeamTaskResult> {
+    const membership = this.roster.membership(caller)
+    const reserved = await this.tasks.reserveDispatch(caller, membership, request.taskId)
+    let assigned = reserved
+    let assignedOwnerId = caller.id
+    let spawned: SpawnTeammateResult
+    try {
+      spawned = await this.roster.spawn(caller, request, {
+        beforeStart: async (member) => {
+          assigned = await this.tasks.finishDispatch(
+            caller,
+            membership,
+            request.taskId,
+            reserved.revision,
+            member,
+          )
+          assignedOwnerId = member.id
+        },
+      })
+    } catch (error: unknown) {
+      try {
+        await this.tasks.cancelDispatch(
+          caller,
+          membership,
+          request.taskId,
+          assigned.revision,
+          assignedOwnerId,
+        )
+      } catch (rollbackError: unknown) {
+        throw new AggregateError([error, rollbackError], 'teammate startup and task reservation rollback both failed')
+      }
+      throw error
+    }
+    return { ...spawned, task: assigned }
+  }
+
+  /**
    * Queue one durable peer message, then attempt immediate delivery.
    * @param caller - exact live sending Team member.
    * @param request - target name, content, and pre-queue cancellation.
@@ -242,9 +291,11 @@ export class TeamService extends Service {
     })
   }
 
-  /** Reconcile roster provisioning before retrying that member's pending mailbox. */
+  /** Reconcile roster and dispatch provisioning before retrying pending mailbox delivery. */
   private async recoverFor(agent: Agent): Promise<void> {
     await this.roster.recoverFor(agent, this.lifecycle.signal)
+    const membership = this.roster.tryMembership(agent)
+    if (membership?.role === 'lead') await this.tasks.reconcileDispatches(membership)
     await this.mailbox.recoverFor(agent, this.lifecycle.signal)
   }
 

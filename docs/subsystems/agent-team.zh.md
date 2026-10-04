@@ -71,7 +71,7 @@ interface TeamTaskSnapshot {
 }
 ```
 
-`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`deleted` 是保留的 tombstone。view 会添加 owner name、readiness 和 write-scope 重叠警告，但不会改变持久快照。
+`pending` 表示尚未开始或已经释放，`in_progress` 携带 owner，`completed` 满足 blocker，`deleted` 是保留的 tombstone。view 会添加 owner name、`remainingBlockers`、readiness 和 write-scope 重叠警告，但不会改变持久快照。dispatch 先预留就绪任务，把 provisioning teammate 写成 owner，之后才投递初始 prompt；移除未完成 dependency edge 或在工作开始后添加它都会被拒绝。
 
 <a id="web-projection"></a>
 
@@ -102,6 +102,8 @@ interface TeamTaskView {
   readonly blockedBy: TeamTaskId[]
   readonly writeScopes: string[]
   readonly ownerName?: string
+  /** Incomplete declared dependencies in task creation order. */
+  readonly remainingBlockers: TeamTaskId[]
   readonly ready: boolean
   readonly writeScopeWarnings: string[]
 }
@@ -160,6 +162,16 @@ listMembers(agent: Agent): TeamMemberView[]
  * @returns the active roster row.
  */
 async spawnTeammate(caller: Agent, request: SpawnTeammateRequest): Promise<SpawnTeammateResult>
+
+/**
+ * Reserve one ready task, provision its teammate identity, assign ownership,
+ * then deliver the first prompt. Startup failure releases the exact committed
+ * dispatch revision.
+ * @param caller - exact live Lead Agent.
+ * @param request - ready task identity plus teammate creation fields.
+ * @returns the active roster row and its in-progress task.
+ */
+async dispatchTaskToTeammate( caller: Agent, request: DispatchTeamTaskRequest, ): Promise<DispatchTeamTaskResult>
 
 /**
  * Queue one durable peer message, then attempt immediate delivery.

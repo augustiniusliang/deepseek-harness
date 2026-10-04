@@ -110,6 +110,34 @@ describe('dsh run with Agent Teams enabled', () => {
         const data = record.data as { task?: { status?: string } } | undefined
         return data?.task?.status === 'completed'
       })).toHaveLength(2)
+      const researchCompletedIndex = root!.findIndex((record) => {
+        const data = record.data as { task?: { id?: string; status?: string } } | undefined
+        return record.type === 'team/task'
+          && data?.task?.id === 'task-1'
+          && data.task.status === 'completed'
+      })
+      const implementerProvisionedIndex = root!.findIndex((record) => {
+        const data = record.data as { member?: { name?: string; phase?: string } } | undefined
+        return record.type === 'team/member'
+          && data?.member?.name === 'implementer'
+          && data.member.phase === 'provisioning'
+      })
+      const implementationAssignedIndex = root!.findIndex((record) => {
+        const data = record.data as { task?: { id?: string; status?: string } } | undefined
+        return record.type === 'team/task'
+          && data?.task?.id === 'task-2'
+          && data.task.status === 'in_progress'
+      })
+      const implementerActiveIndex = root!.findIndex((record) => {
+        const data = record.data as { member?: { name?: string; phase?: string } } | undefined
+        return record.type === 'team/member'
+          && data?.member?.name === 'implementer'
+          && data.member.phase === 'active'
+      })
+      expect(researchCompletedIndex).toBeGreaterThanOrEqual(0)
+      expect(implementerProvisionedIndex).toBeGreaterThan(researchCompletedIndex)
+      expect(implementationAssignedIndex).toBeGreaterThan(implementerProvisionedIndex)
+      expect(implementerActiveIndex).toBeGreaterThan(implementationAssignedIndex)
       const toolNames = root!.filter(record => record.type === 'tool/call')
         .map(record => (record.data as { name?: string } | undefined)?.name)
       expect(toolNames).toContain('wait_agent')
