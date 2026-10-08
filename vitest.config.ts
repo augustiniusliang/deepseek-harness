@@ -156,6 +156,13 @@ const processBoundTests = [
   'packages/llm/llm-pi-ai/tests/adapter.spec.ts',
   'packages/boot/app-boot/tests/app-boot.spec.ts',
   'packages/workflow/workflow-ptc/tests/workflow-ptc.spec.ts',
+  // Spawn real headless dsh hosts and SIGKILL them at failpoints: process
+  // APIs, pid probes, and 120s subprocess budgets that worker-thread
+  // isolation cannot own.
+  'packages/test-support/durable-runtime/tests/harness.spec.ts',
+  'packages/test-support/durable-runtime/tests/repro-input-claim.spec.ts',
+  'packages/test-support/durable-runtime/tests/repro-parallel-tools.spec.ts',
+  'packages/test-support/durable-runtime/tests/repro-schedule-dup.spec.ts',
 ]
 
 export default defineConfig({

@@ -1,0 +1,61 @@
+# Bilingual-pair consistency record for README.md (docs/i18n/README.md): per heading
+# section, a hash of its English and Chinese blocks outside code blocks and generated regions.
+# After editing either side, bring the other along and re-record with:
+#   pnpm run verify-translation-pairing --write packages/test-support/durable-runtime/README.md
+/:
+  en: 9e2b2f2b9a5f424f
+  zh: 912b6bae5e366bc5
+/deepseek-ai-dsh-durable-runtime:
+  en: 6d1d19cde5854f53
+  zh: c609424882157853
+/deepseek-ai-dsh-durable-runtime/summary:
+  en: 2f8a703f018996ec
+  zh: 6152f3b8b14f1b69
+/deepseek-ai-dsh-durable-runtime/table-of-contents:
+  en: d152484eb41ac6b4
+  zh: 09388d293f9be9cb
+/deepseek-ai-dsh-durable-runtime/use-this-package:
+  en: 1e497abac00c2cfe
+  zh: bb3b43ea8dbfd5cd
+/deepseek-ai-dsh-durable-runtime/use-this-package/failpoint-checkpoints:
+  en: efe0ab89fcebbaf6
+  zh: c296d21d7a6d3ea2
+/deepseek-ai-dsh-durable-runtime/use-this-package/evidence-streams:
+  en: 8c4a80797e617ce3
+  zh: f1d3183032652b9c
+/deepseek-ai-dsh-durable-runtime/use-this-package/platform-notes:
+  en: 7265b56b0c7c1c83
+  zh: faac5f6dde4415d8
+/deepseek-ai-dsh-durable-runtime/understand-the-implementation:
+  en: 42b15ac6321706aa
+  zh: c5500056b41ce570
+/deepseek-ai-dsh-durable-runtime/understand-the-implementation/design:
+  en: 9b4f3e3bc46c0ae4
+  zh: cd65290cea7dfc50
+/deepseek-ai-dsh-durable-runtime/understand-the-implementation/source-map:
+  en: 66453364ec2298f5
+  zh: cf489ae040dd651d
+/deepseek-ai-dsh-durable-runtime/further-exploration:
+  en: 4a8280b1ca69a9c7
+  zh: bae3fa2a044dd0f9
+/deepseek-ai-dsh-durable-runtime/model-experience:
+  en: 215e7ba838619b7b
+  zh: a311da3843709f90
+/deepseek-ai-dsh-durable-runtime/model-experience/fixture-tool-durable-effect:
+  en: 41261b2ddd5ab3b5
+  zh: 21cebd3e547409f6
+/deepseek-ai-dsh-durable-runtime/model-experience/fixture-tool-durable-effect/what-the-model-sees:
+  en: 02b56b4442cd7100
+  zh: 979e3e5a16c85eac
+/deepseek-ai-dsh-durable-runtime/model-experience/fixture-tool-durable-effect/token-effect:
+  en: 876769e0ab449af1
+  zh: a233b9ceda047d38
+/deepseek-ai-dsh-durable-runtime/model-experience/fixture-tool-durable-effect/kv-cache-effect:
+  en: df3f9bff64b36f1e
+  zh: 776821f0e5f641f8
+/deepseek-ai-dsh-durable-runtime/known-limitations-and-deferred-work:
+  en: 9e85c1ab46c8b67a
+  zh: 951e4ddbb568e20b
+/deepseek-ai-dsh-durable-runtime/known-limitations-and-deferred-work/dev-note:
+  en: e67f633dc6fe7773
+  zh: e88aeb617ffb74ea
