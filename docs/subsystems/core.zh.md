@@ -761,6 +761,40 @@ roots(): Agent[]
 
 Source: [`packages/core/agent/src/index.ts`](../../packages/core/agent/src/index.ts)
 
+<a id="ctxexecution--executioncoordinator-abstract-seam"></a>
+
+### `ctx.execution` — `ExecutionCoordinator` (abstract seam)
+
+One commit authority per Cordis realm; load a provider, never this abstract service.
+
+```ts cordis-catalog
+/** Commit immutable facts atomically; no external operations run inside this call.
+ * @param batch - Exact versioned request, including optimistic preconditions.
+ * @returns The committed receipt, or the original receipt on an identical retry.
+ */
+abstract commit(batch: CommitBatch): Promise<CommitReceipt>
+
+/** Resolve acknowledgement loss without issuing another external operation.
+ * @param id - The original transaction identity.
+ * @returns Its committed receipt, or undefined when absent.
+ */
+abstract receipt(id: TransactionId): Promise<CommitReceipt | undefined>
+
+/** Read the committed Run snapshot.
+ * @param id - Run identity.
+ * @returns A detached snapshot or undefined.
+ */
+abstract run(id: RunId): Promise<Run | undefined>
+
+/** Read the committed logical operation.
+ * @param id - Operation identity.
+ * @returns A detached snapshot or undefined.
+ */
+abstract activity(id: OperationId): Promise<Activity | undefined>
+```
+
+Source: [`packages/execution/execution/src/service.ts`](../../packages/execution/execution/src/service.ts)
+
 <a id="agent-events"></a>
 
 ### `agent/*` events

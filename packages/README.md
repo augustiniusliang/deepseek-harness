@@ -28,6 +28,7 @@ Every package lives in exactly one group; new packages join existing groups, and
 
 | Group | Role |
 |---|---|
+| [`execution/`](execution/README.md) | Execution protocol development and volatile reference commits |
 | [`core/`](core/README.md) | Product API spine: sessions, prompts, tools, agent services, and the concrete loop |
 | [`api/`](api/README.md) | Remote BFF assembly and Typert RPC gateway |
 | [`typert/`](typert/README.md) | Type graph generation, artifact loading, and runtime registry |

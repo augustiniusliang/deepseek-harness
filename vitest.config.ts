@@ -148,6 +148,7 @@ const coveragePartitionMode = coveragePartitionRaw === '1'
 // that worker threads cannot isolate reliably under aggregate gate contention.
 // Keep the narrow exception in forks while the rest of the inventory avoids per-file processes.
 const processBoundTests = [
+  'packages/execution/execution/tests/loader.spec.ts',
   'packages/session/session-persistence-jsonl/tests/jsonl.spec.ts',
   'packages/subagent/subagent-acp/tests/subagent-acp.spec.ts',
   'packages/subprocess/subprocess-local/tests/process-exit.spec.ts',

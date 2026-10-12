@@ -28,6 +28,7 @@ harness 由 `packages/` 下的 npm 包组装而成，按能力系列分组：会
 
 | 组 | 职责 |
 |---|---|
+| [`execution/`](execution/README.zh.md) | 执行协议开发与易失参考提交 |
 | [`core/`](core/README.zh.md) | 产品 API 主干：会话、提示词、工具、agent 服务与具体循环 |
 | [`api/`](api/README.zh.md) | Remote BFF 装配与 Typert RPC 网关 |
 | [`typert/`](typert/README.zh.md) | 类型图生成、产物加载与运行时注册表 |

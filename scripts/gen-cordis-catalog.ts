@@ -50,6 +50,7 @@ export { REGION_BEGIN, REGION_END }
  * errors, so the partition can never silently drift from the service API.
  */
 export const SERVICE_PAGE: Record<string, string> = {
+  execution: 'core.md',
   speechToText: 'voice-input.md',
   speechController: 'voice-input.md',
   otel: 'otel.md',
@@ -838,6 +839,13 @@ export const FOUNDATION_TYPE_NAMES: ReadonlySet<string> = new Set([
 
 /** Project types deliberately documented outside the subsystems catalog. */
 export const TYPE_LINK_EXEMPTIONS: Readonly<Record<string, string>> = {
+  CommitBatch: 'Execution commit data is owned by packages/execution/execution/src/schema.ts and README.md',
+  CommitReceipt: 'Volatile reference acknowledgement is owned by packages/execution/execution/src/schema.ts and README.md',
+  TransactionId: 'Execution transaction identity is owned by packages/execution/execution/src/brand.ts',
+  Run: 'Execution Run snapshot is owned by packages/execution/execution/src/schema.ts and README.md',
+  RunId: 'Execution Run identity is owned by packages/execution/execution/src/brand.ts',
+  Activity: 'Execution Activity snapshot is owned by packages/execution/execution/src/schema.ts and README.md',
+  OperationId: 'Execution operation identity is owned by packages/execution/execution/src/brand.ts',
   ProductEvent: 'Desktop event fields are owned by packages/client/product-analytics/README.md and src/events.ts',
   ConnectionFetchHandler: 'shared Fetch dispatch is owned by packages/client/connection/src/rpc.ts',
   ConnectionRequestRejection: 'transport rejection status is owned by packages/client/connection/src/rpc.ts',

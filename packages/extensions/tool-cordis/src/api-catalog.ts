@@ -991,6 +991,42 @@ export const SERVICE_API: readonly ServiceApiEntry[] = [
     ],
   },
   {
+    key: 'execution',
+    summary: 'One commit authority per Cordis realm; load a provider, never this abstract service.',
+    description: 'One commit authority per Cordis realm; load a provider, never this abstract service.',
+    methods: [
+      {
+        signature: 'abstract readonly durability: \'volatile\' | \'durable\'',
+        description: 'Whether acknowledged records survive process exit.',
+        parameters: [],
+      },
+      {
+        signature: 'abstract commit(batch: CommitBatch): Promise<CommitReceipt>',
+        description: 'Commit immutable facts atomically; no external operations run inside this call.',
+        parameters: [{ name: 'batch', description: 'Exact versioned request, including optimistic preconditions.' }],
+        returns: 'The committed receipt, or the original receipt on an identical retry.',
+      },
+      {
+        signature: 'abstract receipt(id: TransactionId): Promise<CommitReceipt | undefined>',
+        description: 'Resolve acknowledgement loss without issuing another external operation.',
+        parameters: [{ name: 'id', description: 'The original transaction identity.' }],
+        returns: 'Its committed receipt, or undefined when absent.',
+      },
+      {
+        signature: 'abstract run(id: RunId): Promise<Run | undefined>',
+        description: 'Read the committed Run snapshot.',
+        parameters: [{ name: 'id', description: 'Run identity.' }],
+        returns: 'A detached snapshot or undefined.',
+      },
+      {
+        signature: 'abstract activity(id: OperationId): Promise<Activity | undefined>',
+        description: 'Read the committed logical operation.',
+        parameters: [{ name: 'id', description: 'Operation identity.' }],
+        returns: 'A detached snapshot or undefined.',
+      },
+    ],
+  },
+  {
     key: 'fileReferences',
     summary: 'Host capability for cancellable file-reference discovery.',
     description: 'Host capability for cancellable file-reference discovery.',
@@ -4485,6 +4521,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface AccountWallet {\n    readonly currency: \'CNY\' | \'USD\';\n    readonly balance: string;\n}',
   },
   {
+    name: 'Activity',
+    declaration: 'export type Activity = z.infer<typeof activitySchema>;',
+  },
+  {
     name: 'AdapterRegistrationHandle',
     declaration: 'export interface AdapterRegistrationHandle {\n    (): void;\n    replace(providers: string[]): void;\n}',
   },
@@ -4799,6 +4839,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'CommandSubmitAttachment',
     declaration: 'export type CommandSubmitAttachment = ({\n    readonly type: \'image\';\n} & EncodedImageAttachment) | {\n    readonly type: \'file\';\n    readonly receiptId: string;\n};',
+  },
+  {
+    name: 'CommitBatch',
+    declaration: 'export type CommitBatch = z.infer<typeof commitSchema>;',
+  },
+  {
+    name: 'CommitReceipt',
+    declaration: 'export type CommitReceipt = z.infer<typeof receiptSchema>;',
   },
   {
     name: 'CompactionAgentContext',
@@ -5933,6 +5981,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
     declaration: 'export interface OneShotSubagentDescriptorData extends SubagentDescriptorBase {\n    readonly mode: \'one-shot\';\n    readonly label?: string;\n}',
   },
   {
+    name: 'OperationId',
+    declaration: 'export type OperationId = Branded<\'ExecutionOperationId\'>;',
+  },
+  {
     name: 'OptionalSessionSeq',
     declaration: 'export type OptionalSessionSeq = SessionSeq | null;',
   },
@@ -6311,6 +6363,14 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'RpcId',
     declaration: 'export type RpcId = Branded<\'rpc-id\'>;',
+  },
+  {
+    name: 'Run',
+    declaration: 'export type Run = z.infer<typeof runSchema>;',
+  },
+  {
+    name: 'RunId',
+    declaration: 'export type RunId = Branded<\'ExecutionRunId\'>;',
   },
   {
     name: 'RunnerFailureRule',
@@ -7751,6 +7811,10 @@ export const TYPE_API: readonly TypeApiEntry[] = [
   {
     name: 'ToolUpdate',
     declaration: 'export type ToolUpdate = \'in-history\' | \'addition-only\';',
+  },
+  {
+    name: 'TransactionId',
+    declaration: 'export type TransactionId = Branded<\'ExecutionTransactionId\'>;',
   },
   {
     name: 'Transcript',
