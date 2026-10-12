@@ -75,6 +75,9 @@ function checkFailpoint(runtime, point, toolName) {
 
 /** Route a session event through the durability barrier, then fire the checkpoint. */
 function flushThenCheck(ctx, runtime, session, point, toolName) {
+  const control = readControl(runtime)
+  if (control?.name !== point) return
+  if (typeof control.match?.tool === 'string' && control.match.tool !== toolName) return
   void (async () => {
     try {
       await ctx.sessions.flush(session)
@@ -117,7 +120,7 @@ function effectCallChunks(specs) {
   const chunks = []
   for (const [index, spec] of specs.entries()) {
     const id = ToolCallId(`durable-fixture-${++nextCall}`)
-    const args = JSON.stringify({ name: spec.name, ...(spec.delayMs === undefined ? {} : { delayMs: spec.delayMs }) })
+    const args = JSON.stringify(spec)
     chunks.push(
       { type: 'block-start', index, blockType: 'tool-call' },
       { type: 'tool-call-delta', index, id, name: TOOL_NAME, argumentsDelta: args },
@@ -143,9 +146,10 @@ function parseParallel(prompt) {
 
 /** Deterministic keyless adapter: the initial user text selects the whole protocol. */
 class DurableFixtureAdapter extends LlmAdapter {
-  constructor(runtime) {
+  constructor(runtime, scheduleDelivered) {
     super()
     this.runtime = runtime
+    this.scheduleDelivered = scheduleDelivered
   }
 
   async * stream(options) {
@@ -156,7 +160,12 @@ class DurableFixtureAdapter extends LlmAdapter {
     const prompt = initial?.content[0]?.text?.trim() ?? ''
     const settled = options.messages.some(message => message.role === 'tool')
     let chunks
-    if (prompt.startsWith('ECHO:')) {
+    if (prompt === 'SCHEDULE:resume') {
+      await this.scheduleDelivered
+      chunks = textChunks('DONE:SCHEDULE')
+    } else if (prompt === 'SCHEDULE') {
+      chunks = settled ? textChunks('DONE:SCHEDULE') : effectCallChunks([{ name: 'schedule' }])
+    } else if (prompt.startsWith('ECHO:')) {
       chunks = textChunks(prompt.slice('ECHO:'.length))
     } else if (prompt.startsWith('EFFECT:')) {
       const effectName = prompt.slice('EFFECT:'.length)
@@ -165,6 +174,11 @@ class DurableFixtureAdapter extends LlmAdapter {
       const specs = parseParallel(prompt)
       if (specs === undefined) throw new Error(`durable-fixture: malformed PARALLEL prompt ${JSON.stringify(prompt)}`)
       chunks = settled ? textChunks('DONE:PARALLEL') : effectCallChunks(specs)
+    } else if (prompt === 'BARRIER') {
+      chunks = settled ? textChunks('DONE:BARRIER') : effectCallChunks([
+        { name: 'A', barrier: 'first' },
+        { name: 'B', barrier: 'second' },
+      ])
     } else {
       throw new Error(`durable-fixture: unrecognized prompt protocol ${JSON.stringify(prompt)}`)
     }
@@ -188,21 +202,54 @@ export function apply(ctx, config) {
     throw new Error('durable-fixture: config.runtime must be the absolute runtime directory')
   }
 
-  const adapter = new DurableFixtureAdapter(runtime)
+  const scheduleDelivered = Promise.withResolvers()
+  const adapter = new DurableFixtureAdapter(runtime, scheduleDelivered.promise)
   ctx.llm.registerAdapter(['deepseek-official'], adapter)
+
+  if (config.schedule === true) {
+    const pending = new Set()
+    ctx.on('session/event', (session, event) => {
+      if (event.type === 'agent/inbox/spliced'
+        && event.data.inserted.some(message => message.source.kind === 'schedule')) pending.add(session.id)
+    })
+    ctx.on('domain/changed', change => {
+      if (change.domain === 'schedule' && change.operation === 'put' && change.value.status === 'inactive') {
+        ledgerAppend(runtime, { kind: 'schedule-committed', detail: { name: change.key } })
+        scheduleDelivered.resolve()
+      }
+    })
+    const sessions = ctx.sessions
+    const originalFlush = sessions.flush
+    ctx.effect(() => {
+      sessions.flush = async function (session) {
+        const delivering = pending.has(session.id)
+        const flushed = await originalFlush.call(this, session)
+        if (flushed && delivering && pending.delete(session.id)) {
+          ledgerAppend(runtime, { kind: 'schedule-delivered', detail: { name: session.id } })
+          checkFailpoint(runtime, 'schedule-flushed')
+        }
+        return flushed
+      }
+      return () => { sessions.flush = originalFlush }
+    })
+  }
 
   // callId → durable_effect `name` argument, so tool/result checkpoints can
   // apply `match.tool` against the logical effect name.
   const effectNames = new Map()
+  const firstStarted = Promise.withResolvers()
+  const secondSettled = Promise.withResolvers()
 
   ctx.tools.register({
     name: TOOL_NAME,
+    isConcurrencySafe: args => args.barrier === 'first' || args.barrier === 'second',
     description: 'Record one named external side effect in the durable fixture ledger, optionally after a delay.',
     parameters: {
       type: 'object',
       properties: {
         name: { type: 'string', description: 'Effect identity recorded in the ledger.' },
         delayMs: { type: 'number', description: 'Optional settle delay in milliseconds before the effect commits.' },
+        barrier: { type: 'string', enum: ['first', 'second'], description: 'Coordinate two concurrency-safe fixture calls.' },
       },
       required: ['name'],
     },
@@ -210,7 +257,22 @@ export function apply(ctx, config) {
       schema: { type: 'string' },
       render: (_args, value) => [{ type: 'text', text: String(value) }],
     },
-    async execute(args) {
+    async execute(args, exec) {
+      if (args.name === 'schedule' && config.schedule === true) {
+        await ctx.get('schedule').create(exec.agent.session.id, {
+          after_seconds: 1, title: 'Durable fixture reminder', prompt: 'fixture scheduled input',
+        })
+        await scheduleDelivered.promise
+        return 'SCHEDULE_DELIVERED'
+      }
+      if (args.barrier === 'first') {
+        ledgerAppend(runtime, { kind: 'tool-started', detail: { name: args.name } })
+        firstStarted.resolve()
+        await secondSettled.promise
+      } else if (args.barrier === 'second') {
+        await firstStarted.promise
+        ledgerAppend(runtime, { kind: 'tool-started', detail: { name: args.name } })
+      }
       if (typeof args.delayMs === 'number' && args.delayMs > 0) {
         await new Promise(resolve => setTimeout(resolve, args.delayMs))
       }
@@ -218,6 +280,14 @@ export function apply(ctx, config) {
       // returns, independently accounted across processes.
       ledgerAppend(runtime, { kind: 'tool-effect', detail: { name: args.name } })
       checkFailpoint(runtime, 'external-effect', args.name)
+      if (args.barrier === 'second') {
+        // The next event-loop turn follows body settlement and its promise reactions.
+        setImmediate(() => {
+          ledgerAppend(runtime, { kind: 'tool-settled', detail: { name: 'B' } })
+          checkFailpoint(runtime, 'tool-settled', 'B')
+          secondSettled.resolve()
+        })
+      }
       return `EFFECT_DONE:${String(args.name)}`
     },
   })

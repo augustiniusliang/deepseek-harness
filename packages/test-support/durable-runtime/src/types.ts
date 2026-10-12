@@ -12,6 +12,8 @@ export type FailpointName =
   | 'model-settled'
   | 'dispatch-intent'
   | 'external-effect'
+  | 'tool-settled'
+  | 'schedule-flushed'
   | 'receipt-stored'
   | 'outbox-delivered'
 
@@ -26,7 +28,7 @@ export interface FailpointSpec {
 }
 
 /** Ledger row kinds the fixture host plugin can append. */
-export type LedgerKind = 'model-request' | 'tool-effect' | 'failpoint-hit'
+export type LedgerKind = 'model-request' | 'tool-effect' | 'failpoint-hit' | 'tool-started' | 'tool-settled' | 'schedule-delivered' | 'schedule-committed'
 
 /**
  * One append-only ledger row, durable once visible: the fixture opens the

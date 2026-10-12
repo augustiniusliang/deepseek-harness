@@ -50,6 +50,31 @@ afterAll(() => {
 })
 
 describe('durable-runtime facility', () => {
+  it.each(['input-accepted', 'dispatch-intent', 'receipt-stored'] as const)(
+    'reaches the armed %s checkpoint in a real host', async (name) => {
+      const runtime = await makeRuntime()
+      await armFailpoint(runtime, { name, once: true })
+      const result = await spawnDurableHost(runtime, { prompt: 'EFFECT:checkpoint' }).result
+      expectKilledBySigkill(result)
+      await expectFailpointHit(runtime, name)
+      const rows = (await readSessionLogFiles(runtime))[0]!.rows
+      expect(eventTypes(rows)).toContain('user/message')
+      if (name === 'dispatch-intent') await expectSideEffectCount(runtime, 'tool-effect', 0)
+      if (name === 'receipt-stored') {
+        await expectSideEffectCount(runtime, 'tool-effect', 1)
+        expect(toolResultCallIds(rows)).toEqual(toolCalls(rows).map(call => call.callId))
+      }
+    }, HOST_TEST_TIMEOUT_MS,
+  )
+
+  it('reports a host deadline separately from an injected kill', async () => {
+    const runtime = await makeRuntime()
+    const result = await spawnDurableHost(runtime, { prompt: 'ECHO:deadline', timeoutMs: 1 }).result
+    expect(result.timedOut).toBe(true)
+    await expectSideEffectCount(runtime, 'failpoint-hit', 0)
+    expectNoOrphanHosts()
+  }, HOST_TEST_TIMEOUT_MS)
+
   it('boots a normal run and records consistent evidence', async () => {
     const runtime = await makeRuntime()
     const host = spawnDurableHost(runtime, { prompt: 'ECHO:hello' })
@@ -218,12 +243,14 @@ describe('durable-runtime readers and control edges', () => {
 
   it('honors DURABLE_RUNTIME_BASE for runtime placement', async () => {
     const base = await mkdtemp(join(tmpdir(), 'dsh-durable-base-'))
+    const original = process.env[DURABLE_RUNTIME_BASE_ENV]
     try {
       process.env[DURABLE_RUNTIME_BASE_ENV] = base
       const runtime = await makeRuntime()
       expect(runtime.root.startsWith(base)).toBe(true)
     } finally {
-      delete process.env.DURABLE_RUNTIME_BASE
+      if (original === undefined) delete process.env.DURABLE_RUNTIME_BASE
+      else process.env[DURABLE_RUNTIME_BASE_ENV] = original
       await rm(base, { recursive: true, force: true })
     }
   })

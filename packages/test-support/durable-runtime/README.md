@@ -39,6 +39,8 @@ await runtime.dispose()                     // after teardownDurableHosts()
 
 Restart is a second `spawnDurableHost` against the same runtime; resuming the crashed session uses `sessionId` (headless `--session-id`). Prompts select the deterministic protocol: `ECHO:<text>` answers `<text>`, `EFFECT:<name>` runs one `durable_effect` call and answers `DONE:<name>`, `PARALLEL:A:<delayMs>:B:<delayMs>` runs two `durable_effect` calls and answers `DONE:PARALLEL`.
 
+The legacy `PARALLEL` protocol uses exclusive calls. `BARRIER` declares concurrency-safe calls and holds A until B has returned and its promise reactions have run, without timing delays. `createDurableTestRuntime({ schedule: true })` mounts real Schedule, Session controller, workspace, upload and Connection services without a Web server. `SCHEDULE` creates a reminder and waits for its task receipt; a fresh foreground `SCHEDULE:resume` run waits while Schedule restores the original Session. Do not also pass that target's `sessionId`: two restorers would compete for its write handle.
+
 ### Failpoint checkpoints
 
 The checkpoint names are the facility's public API. `match.tool` compares against the `durable_effect` call's `name` argument.
@@ -46,10 +48,12 @@ The checkpoint names are the facility's public API. `match.tool` compares agains
 | Failpoint | Real seam | Fires |
 |---|---|---|
 | `input-accepted` | `session/event` (`user/message`) + awaited `SessionStore.flush` barrier | After the user message is durably flushed |
-| `input-claimed` | `session/event` (`agent/inbox/spliced` with `removedCount > 0`) | When the agent loop durably claims pending input |
+| `input-claimed` | `session/event` (`agent/inbox/spliced` with `removedCount > 0`) | When the loop claims input, before any durability acknowledgement |
 | `model-settled` | fixture LLM adapter, after the final chunk, before `stream()` returns | Before the loop commits the settled response |
 | `dispatch-intent` | `tools/pre-execute` waterfall (listener calls `next()`) | Before the fixture tool body runs |
 | `external-effect` | inside the `durable_effect` body, after its fsynced ledger write | Before the tool returns |
+| `tool-settled` | Next event-loop turn after barrier B returns | While A remains blocked, before ordered result publication |
+| `schedule-flushed` | Wrapped real `SessionStore.flush` | After delivery is durable, before the caller writes the task receipt |
 | `receipt-stored` | `session/event` (`tool/result`) + awaited flush barrier | After the tool result is durably flushed |
 | `outbox-delivered` | `session/event` (`team/message/delivered`) + awaited flush barrier | After an Agent Teams delivery is durably flushed; needs the agent-team bundle via `profileExtras`, which the built-in protocol does not drive |
 
@@ -58,6 +62,8 @@ On a hit the fixture deletes a `once` control file, appends `{kind:'failpoint-hi
 ### Evidence streams
 
 The ledger at `<runtime>/ledger/effects.jsonl` is append-only; every row is written with open-write-fsync-close, so a row the test reads survived the kill. Kinds: `model-request` (every adapter invocation), `tool-effect` (the external side effect), `failpoint-hit`. Session JSONL logs live under `<runtime>/home/sessions` (uncompressed, per the generated profile); `readSessionLogFiles` plus the `toolCalls` / `toolResultCallIds` / `inboxClaimCount` / `hasUnclosedTurn` reducers answer what durably happened. Durable logs never contain interrupted-turn closers; a resuming reader derives them (`interruptedTurnClosers` in `@deepseek-ai/dsh-session`), and a resumed run persists the repair rows.
+
+Barrier evidence adds `tool-started` and `tool-settled`; Schedule evidence adds `schedule-delivered` after inbox durability and `schedule-committed` after the task receipt, distinguishing overlap, body return and acknowledgement.
 
 ### Platform notes
 
@@ -96,7 +102,7 @@ The fixture (`fixtures/durable-fixture.mjs`, plain ESM loaded by absolute file U
 
 - [loader-smoke](../loader-smoke/README.md) — the dual-mode launcher and subprocess harness this package builds on.
 - [Session package](../../core/session/README.md) — `session/event` / `session/flush` semantics behind the flush-barrier checkpoints.
-- [Schedule package](../../schedule/schedule/README.md) — documents why schedule delivery cannot mount headless.
+- [Schedule package](../../schedule/schedule/README.md) — persistence and Session controller requirements for reminder delivery.
 - [Testing policy](../../../docs/testing.md) — subprocess launch modes and resource-ownership rules.
 - [Test-support group map](../README.md) — sibling harnesses.
 
@@ -123,9 +129,9 @@ Independent behavior: the fixture adapter answers every request from the protoco
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **Schedule delivery cannot be reproduced headless** — `ScheduleService.inject` requires the Host Web `sessionController` (packages/schedule/schedule/src/index.ts:101), which the headless bundle does not compose; `tests/repro-schedule-dup.spec.ts` stays skipped until a browser-free Web composition exists.
+- **Schedule composition is opt-in** — the standard headless bundle omits its dependencies. The fixture's `schedule: true` option supplies them and restores its flush wrapper on disposal. This tests real services, not browser controls.
 - **`outbox-delivered` has no driving protocol** — the checkpoint listens for the agent-team `team/message/delivered` session event, but the built-in adapter protocol cannot drive a Team composition; exercising it needs a team-capable fixture adapter via `profileExtras`.
-- **Flush-barrier checkpoints race the continuing loop** — `input-accepted`, `receipt-stored`, and `outbox-delivered` kill after an awaited flush while the agent loop proceeds; subsequent events may or may not commit first, so scenarios must assert the checkpoint's own evidence rather than an exact tail.
+- **Flush-barrier checkpoints race the loop** — armed `input-accepted`, `receipt-stored`, and `outbox-delivered` explicitly flush and kill while the loop proceeds; subsequent events may commit first. Unarmed checkpoints never add flushes. An armed checkpoint proves its requested barrier, not the uninstrumented loop's durability.
 - **Pid-reuse window in orphan detection** — `expectNoOrphanHosts` probes recorded pids; a reaped pid reassigned to an unrelated process before the probe reads as a leak.
 
 <a id="dev-note"></a>

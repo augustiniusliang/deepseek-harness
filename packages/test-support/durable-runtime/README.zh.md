@@ -39,6 +39,8 @@ await runtime.dispose()                     // after teardownDurableHosts()
 
 重启就是对同一运行时再次 `spawnDurableHost`；恢复崩溃的 session 使用 `sessionId`（headless `--session-id`）。提示词选择确定性协议：`ECHO:<text>` 回答 `<text>`，`EFFECT:<name>` 执行一次 `durable_effect` 调用并回答 `DONE:<name>`，`PARALLEL:A:<delayMs>:B:<delayMs>` 执行两次 `durable_effect` 调用并回答 `DONE:PARALLEL`。
 
+旧 `PARALLEL` 协议使用独占调用。`BARRIER` 显式声明调用可并发，让 A 等待 B 返回及其 Promise 回调执行完毕，无需延时。`createDurableTestRuntime({ schedule: true })` 挂载真实 Schedule、Session controller、workspace、upload 和 Connection 服务，不启动 Web server。`SCHEDULE` 创建提醒并等待任务回执；新的前台 `SCHEDULE:resume` 运行等待 Schedule 自己恢复原 Session，不得同时传入目标的 `sessionId`，以免两个恢复者争抢写句柄。
+
 ### 故障点检查点
 
 检查点名称是本设施的公开 API。`match.tool` 与 `durable_effect` 调用的 `name` 实参比较。
@@ -46,10 +48,12 @@ await runtime.dispose()                     // after teardownDurableHosts()
 | 故障点 | 真实接缝 | 触发时机 |
 |---|---|---|
 | `input-accepted` | `session/event`（`user/message`）+ 等待 `SessionStore.flush` 屏障 | 用户消息持久落盘之后 |
-| `input-claimed` | `session/event`（`agent/inbox/spliced` 且 `removedCount > 0`） | agent loop 持久认领待处理输入时 |
+| `input-claimed` | `session/event`（`agent/inbox/spliced` 且 `removedCount > 0`） | loop 认领输入、持久性确认尚未发生时 |
 | `model-settled` | fixture LLM 适配器中，最后一个 chunk 之后、`stream()` 返回之前 | loop 提交已定响应之前 |
 | `dispatch-intent` | `tools/pre-execute` 瀑布（监听器调用 `next()`） | fixture 工具体运行之前 |
 | `external-effect` | `durable_effect` 工具体内，fsync 台账写入之后 | 工具返回之前 |
+| `tool-settled` | 屏障 B 返回后的下一次事件循环 | A 仍阻塞、有序结果尚未发布时 |
+| `schedule-flushed` | 包装真实 `SessionStore.flush` | 投递持久化之后、调用者写任务回执之前 |
 | `receipt-stored` | `session/event`（`tool/result`）+ 等待 flush 屏障 | 工具结果持久落盘之后 |
 | `outbox-delivered` | `session/event`（`team/message/delivered`）+ 等待 flush 屏障 | Agent Teams 投递持久落盘之后；需经 `profileExtras` 加入 agent-team bundle，内置协议不驱动该组合 |
 
@@ -58,6 +62,8 @@ await runtime.dispose()                     // after teardownDurableHosts()
 ### 证据流
 
 `<runtime>/ledger/effects.jsonl` 台账只追加；每行都按 打开-写入-fsync-关闭 写入，因此测试读到的行必然在杀进程后幸存。种类：`model-request`（每次适配器调用）、`tool-effect`（外部副作用）、`failpoint-hit`。Session JSONL 日志位于 `<runtime>/home/sessions`（按生成的 profile 不压缩）；`readSessionLogFiles` 及 `toolCalls` / `toolResultCallIds` / `inboxClaimCount` / `hasUnclosedTurn` 归约器回答持久发生了什么。持久日志从不包含中断轮次的收尾事件；恢复方在读取时推导它们（`@deepseek-ai/dsh-session` 的 `interruptedTurnClosers`），而恢复后的运行会把修复行持久化。
+
+屏障证据增加 `tool-started` 与 `tool-settled`；Schedule 证据增加 inbox 持久化后的 `schedule-delivered` 与任务回执写入后的 `schedule-committed`，区分并发重叠、工具体返回和确认。
 
 ### 平台说明
 
@@ -96,7 +102,7 @@ fixture（`fixtures/durable-fixture.mjs`，纯 ESM，按绝对文件 URL 加载�
 
 - [loader-smoke](../loader-smoke/README.zh.md)——本包构建其上的双模式启动器与子进程 harness。
 - [Session 包](../../core/session/README.zh.md)——flush 屏障检查点背后的 `session/event` / `session/flush` 语义。
-- [Schedule 包](../../schedule/schedule/README.zh.md)——记录 schedule 投递为何无法 headless 挂载。
+- [Schedule 包](../../schedule/schedule/README.zh.md)——提醒投递所需的持久存储与 Session controller。
 - [测试策略](../../../docs/testing.zh.md)——子进程启动模式与资源所有权规则。
 - [测试支持组地图](../README.zh.md)——同级 harness。
 
@@ -123,9 +129,9 @@ fixture（`fixtures/durable-fixture.mjs`，纯 ESM，按绝对文件 URL 加载�
 
 <a id="known-limitations-and-deferred-work"></a>
 
-- **schedule 投递无法在 headless 复现**——`ScheduleService.inject` 依赖 Host Web 的 `sessionController`（packages/schedule/schedule/src/index.ts:101），headless bundle 不组合该服务；在出现无浏览器的 Web 组合之前，`tests/repro-schedule-dup.spec.ts` 保持跳过。
+- **Schedule 组合需显式启用**——标准 headless bundle 不含其依赖；fixture 的 `schedule: true` 选项补齐依赖并在销毁时恢复 flush 包装。测试覆盖真实服务，不覆盖浏览器控件。
 - **`outbox-delivered` 没有驱动协议**——该检查点监听 agent-team 的 `team/message/delivered` session 事件，但内置适配器协议无法驱动 Team 组合；要触发它需经 `profileExtras` 提供能驱动 team 的 fixture 适配器。
-- **flush 屏障检查点与继续前行的 loop 竞争**——`input-accepted`、`receipt-stored` 与 `outbox-delivered` 在等待 flush 后才杀进程，期间 agent loop 继续前进；后续事件可能先提交，因此场景必须断言检查点自身的证据，而不是精确的日志尾部。
+- **flush 屏障检查点与 loop 竞争**——已武装的 `input-accepted`、`receipt-stored` 与 `outbox-delivered` 显式 flush 后杀进程，期间 loop 继续前进，后续事件可能先提交。未武装检查点不增加 flush。武装检查点证明的是所请求的屏障，不是未插桩 loop 本身的持久性。
 - **孤儿检测存在 pid 复用窗口**——`expectNoOrphanHosts` 探测记录的 pid；已被回收的 pid 在探测前分配给无关进程时会被读作泄漏。
 
 <a id="dev-note"></a>

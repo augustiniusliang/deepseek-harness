@@ -23,7 +23,7 @@ const tsconfigPath = join(repoRoot, 'tsconfig.json')
 
 /** Inputs to {@link spawnDurableHost}. */
 export interface SpawnDurableHostOptions {
-  /** The task text; the fixture protocol keys on it (`ECHO:`, `EFFECT:`, `PARALLEL:`). */
+  /** The task text selects the fixture protocol documented in the package README. */
   readonly prompt: string
   /** Adopt this persisted session instead of starting a fresh one (headless `--session-id`). */
   readonly sessionId?: string

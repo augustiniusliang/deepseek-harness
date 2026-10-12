@@ -27,17 +27,56 @@ afterEach(async () => {
   await Promise.all(runtimes.splice(0).map(runtime => runtime.dispose()))
 })
 
-describe('repro: kill after the second parallel tool effect commits', () => {
+describe('repro: tool effects before ordered receipts', () => {
+  it('settles B while A is blocked, then publishes results in model order without a kill', async () => {
+    const runtime = await createDurableTestRuntime()
+    runtimes.push(runtime)
+    const result = await spawnDurableHost(runtime, { prompt: 'BARRIER' }).result
+    expect(result.timedOut).toBe(false)
+    expect(result.exitCode, result.stderr).toBe(0)
+    expect(result.stdout).toBe('DONE:BARRIER\n')
+    const ledger = await readLedger(runtime)
+    expect(ledger.filter(entry => entry.kind !== 'model-request').map(entry => `${entry.kind}:${entry.detail?.name}`)).toEqual([
+      'tool-started:A', 'tool-started:B', 'tool-effect:B', 'tool-settled:B', 'tool-effect:A',
+    ])
+    const rows = (await readSessionLogFiles(runtime))[0]!.rows
+    expect(toolResultCallIds(rows)).toEqual(toolCalls(rows).map(call => call.callId))
+    await expect(expectFailpointHit(runtime, 'tool-settled')).rejects.toThrow('expected a failpoint-hit')
+  }, HOST_TEST_TIMEOUT_MS)
+
+  it('loses the successful B outcome when killed before blocked A completes', async () => {
+    const runtime = await createDurableTestRuntime()
+    runtimes.push(runtime)
+    await armFailpoint(runtime, { name: 'tool-settled', once: true, match: { tool: 'B' } })
+    const killed = await spawnDurableHost(runtime, { prompt: 'BARRIER' }).result
+    expectKilledBySigkill(killed)
+    await expectFailpointHit(runtime, 'tool-settled')
+    expect((await readLedger(runtime)).map(entry => `${entry.kind}:${entry.detail?.name ?? ''}`)).toEqual([
+      'model-request:', 'tool-started:A', 'tool-started:B', 'tool-effect:B',
+      'tool-settled:B', 'failpoint-hit:tool-settled',
+    ])
+    const files = await readSessionLogFiles(runtime)
+    expect(files).toHaveLength(1)
+    const rows = files[0]!.rows
+    const calls = toolCalls(rows)
+    expect(calls).toHaveLength(2)
+    expect(toolResultCallIds(rows)).toEqual([])
+    const resumed = await spawnDurableHost(runtime, { prompt: 'ECHO:after', sessionId: sessionIdFromHeader(rows) }).result
+    expect(resumed.timedOut).toBe(false)
+    expect(resumed.exitCode, resumed.stderr).toBe(0)
+    const after = (await readSessionLogFiles(runtime))[0]!.rows
+    expect(toolResultCallIds(after)).toEqual(calls.map(call => call.callId))
+    expect(after.filter(row => row.type === 'tool/result').every(row => JSON.stringify(row.data).includes('outcome is unknown'))).toBe(true)
+    expect((await readLedger(runtime)).filter(entry => entry.kind === 'tool-effect').map(entry => entry.detail?.name)).toEqual(['B'])
+    expectNoOrphanHosts()
+  }, HOST_TEST_TIMEOUT_MS)
+
   it('records B’s durable effect without its receipt; resume persists an unknown-outcome repair', async () => {
     const runtime = await createDurableTestRuntime()
     runtimes.push(runtime)
     await armFailpoint(runtime, { name: 'external-effect', once: true, match: { tool: 'B' } })
 
-    // OBSERVED current behavior, contrary to the naive parallel-reading:
-    // tool calls from one assistant message dispatch SERIALLY in model order.
-    // A (delayMs 4000) settles completely — effect and `tool/result` — before
-    // B (delayMs 10) starts, so the kill inside B's body lands after A's
-    // receipt, not "before A finishes".
+    // Calls without a concurrency-safe declaration remain exclusive.
     const host = spawnDurableHost(runtime, { prompt: 'PARALLEL:A:4000:B:10' })
     const result = await host.result
     expectKilledBySigkill(result)

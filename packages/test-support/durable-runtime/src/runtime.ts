@@ -49,6 +49,8 @@ export interface DurableProfileExtras {
 
 /** Inputs to {@link createDurableTestRuntime}. */
 export interface CreateDurableTestRuntimeOptions {
+  /** Mount the real Schedule and Session controller services without a Web server. */
+  readonly schedule?: boolean
   /** Extra bundles and dependencies merged into the generated headless profile. */
   readonly profileExtras?: DurableProfileExtras
 }
@@ -81,12 +83,20 @@ export async function createDurableTestRuntime(
   await mkdir(controlDir, { recursive: true })
   await mkdir(ledgerDir, { recursive: true })
   const extras = options.profileExtras
+  const schedulePlugins: readonly (readonly [string, string])[] = options.schedule === true ? [
+    ['durable-connection', '@deepseek-ai/dsh-client-connection'],
+    ['durable-file-upload', '@deepseek-ai/dsh-client-file-upload'],
+    ['durable-workspace', '@deepseek-ai/dsh-workspace'],
+    ['durable-session-controller', '@deepseek-ai/dsh-api-session-controller'],
+    ['durable-schedule', '@deepseek-ai/dsh-schedule'],
+  ] : []
   await writeFile(join(profileDir, 'package.json'), `${JSON.stringify({
     name: 'dsh-profile-headless',
     private: true,
     dependencies: {
       '@deepseek-ai/dsh-base': 'workspace:^',
       '@deepseek-ai/dsh-headless': 'workspace:^',
+      ...Object.fromEntries(schedulePlugins.map(([, pkg]) => [pkg, 'workspace:*'])),
       ...extras?.dependencies,
     },
     dsh: {
@@ -115,6 +125,8 @@ export async function createDurableTestRuntime(
     `      name: '${fixturePluginUrl}'`,
     '      config:',
     `        runtime: '${root}'`,
+    `        schedule: ${String(options.schedule === true)}`,
+    ...schedulePlugins.flatMap(([id, pkg]) => [`    - id: ${id}`, `      name: '${pkg}'`]),
     '',
   ].join('\n'))
   return {
